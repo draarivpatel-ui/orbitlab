@@ -1,0 +1,34 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "OrbitLab"
+abstract: >-
+  An offline astrodynamics and trajectory analysis console. Propagates
+  orbital elements, builds Porkchop contour maps, budgets C3 and delta-v, and
+  projects transfer paths in the PQW and IJK frames.
+type: software
+license: MIT
+repository-code: "https://github.com/draarivpatel-ui/orbitlab"
+url: "https://aariv.me/orbitlab/"
+keywords:
+  - astrodynamics
+  - orbital-mechanics
+  - porkchop-plot
+  - trajectory
+  - delta-v
+  - javascript
+  - zero-dependency
+authors:
+  - family-names: "Patel"
+    given-names: "Aariv"
+    alias: "draarivpatel-ui"
+preferred-citation:
+  type: software
+  title: "OrbitLab"
+  version: "1.0.0"
+  date-released: "2026-11-08"
+  license: MIT
+  url: "https://aariv.me/orbitlab/"
+  authors:
+    - family-names: "Patel"
+      given-names: "Aariv"
+      alias: "draarivpatel-ui"
