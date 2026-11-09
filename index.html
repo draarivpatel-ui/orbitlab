@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="description" content="OrbitLab: an open source orbital mechanics workbench with transfer planning, Lambert rendezvous, porkchop grids, RK4 propagation and mission file exports.">
+<meta name="theme-color" content="#080D1A">
+<title>OrbitLab - Orbital Mechanics Workbench</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<a class="skip-link" href="#workspace">Skip to workspace</a>
+
+<header class="site-header">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true">
+      <svg viewBox="0 0 40 40" width="40" height="40" role="presentation"><circle cx="20" cy="20" r="5" fill="currentColor"/><ellipse cx="20" cy="20" rx="17" ry="8" fill="none" stroke="currentColor" stroke-width="1.5" transform="rotate(-28 20 20)"/><circle cx="34" cy="12" r="2.5" fill="currentColor"/></svg>
+    </span>
+    <span class="brand-text"><strong>OrbitLab</strong><small>Mission design workbench</small></span>
+  </div>
+  <div class="header-actions">
+    <span class="version-chip">v1.0.0</span>
+    <button id="theme-toggle" class="theme-button" type="button" aria-pressed="true" aria-label="Switch to light theme">
+      <span class="theme-icon" aria-hidden="true">&#9789;</span><span class="theme-label">Dark</span>
+    </button>
+    <a class="repo-link" href="https://github.com/draarivpatel-ui/orbitlab" target="_blank" rel="noopener noreferrer">Source</a>
+  </div>
+</header>
+
+<main id="workspace">
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="hero-copy">
+      <p class="eyebrow">Open source mission control / 08 Nov 2026</p>
+      <h1 id="hero-title">Design the transfer. Read the numbers.</h1>
+      <p class="hero-lede">A browser based astrodynamics desk for Keplerian orbits, impulsive transfers, Lambert rendezvous, J2 precession and multi stage vehicles. Every number comes from the same UMD engine that runs in Node.</p>
+      <div class="hero-stat-row">
+        <div class="stat-tile"><span class="stat-label">Selected mission</span><strong class="stat-value" id="hero-mission">LEO to GEO Comms Transfer</strong></div>
+        <div class="stat-tile"><span class="stat-label">Total maneuver dv</span><strong class="stat-value hero-number" id="hero-dv">3853.96</strong><span class="stat-unit">m/s</span></div>
+        <div class="stat-tile"><span class="stat-label">Orbital period</span><strong class="stat-value" id="hero-period">1.54 h</strong></div>
+      </div>
+    </div>
+    <div class="hero-orbit" aria-hidden="true">
+      <svg viewBox="0 0 320 320" width="320" height="320" role="presentation">
+        <defs><radialGradient id="planetGlow"><stop offset="0%" stop-color="var(--accent-glow)" stop-opacity="0.42"/><stop offset="100%" stop-color="var(--accent-glow)" stop-opacity="0"/></radialGradient></defs>
+        <circle cx="160" cy="160" r="120" fill="url(#planetGlow)"/>
+        <circle cx="160" cy="160" r="52" fill="var(--planet)"/>
+        <circle cx="160" cy="160" r="52" fill="none" stroke="var(--planet-rim)" stroke-width="1"/>
+        <ellipse cx="160" cy="160" rx="140" ry="62" fill="none" stroke="var(--grid-strong)" stroke-width="1" transform="rotate(-24 160 160)"/>
+        <ellipse cx="160" cy="160" rx="104" ry="104" fill="none" stroke="var(--grid)" stroke-width="1"/>
+        <circle cx="286" cy="116" r="6" fill="var(--series-1)"/>
+        <circle cx="286" cy="116" r="11" fill="none" stroke="var(--series-1)" stroke-opacity="0.35" stroke-width="1"/>
+        <circle cx="72" cy="238" r="3.5" fill="var(--series-2)"/>
+      </svg>
+    </div>
+  </section>
+
+  <section class="control-deck" aria-label="Mission controls">
+    <div class="control-row">
+      <div class="control-group">
+        <label for="preset-select">Mission preset</label>
+        <select id="preset-select" class="control-input"></select>
+      </div>
+      <div class="control-group">
+        <label for="view-select">Trajectory view</label>
+        <select id="view-select" class="control-input">
+          <option value="plane">2D orbital plane</option>
+          <option value="inertial">3D inertial projection</option>
+        </select>
+      </div>
+      <div class="control-group">
+        <label for="window-select">Launch window</label>
+        <select id="window-select" class="control-input">
+          <option value="earth-mars">Earth to Mars Hohmann window</option>
+          <option value="earth-venus">Earth to Venus window</option>
+          <option value="leo-geo">LEO to GEO transfer</option>
+          <option value="leo-lunar">LEO to Lunar injection</option>
+        </select>
+      </div>
+      <div class="control-group control-switch">
+        <label for="j2-toggle">J2 perturbation</label>
+        <button id="j2-toggle" class="switch" type="button" role="switch" aria-checked="false"><span class="switch-knob"></span><span class="switch-text">Off</span></button>
+      </div>
+    </div>
+    <div class="control-row control-row-secondary">
+      <div class="control-group slider-group">
+        <label for="scrub-range">Spacecraft position <output id="scrub-output">0%</output></label>
+        <input id="scrub-range" class="range-input" type="range" min="0" max="100" value="0" step="1" aria-label="Spacecraft position along the orbit">
+      </div>
+      <div class="control-group">
+        <button id="play-button" class="secondary-button" type="button" aria-pressed="false">Play animation</button>
+      </div>
+      <div class="control-group export-group" role="group" aria-label="Download mission files">
+        <button id="download-gmat" class="secondary-button" type="button">Download .script</button>
+        <button id="download-oem" class="secondary-button" type="button">Download .oem</button>
+        <button id="download-csv" class="secondary-button" type="button">Download .csv</button>
+      </div>
+    </div>
+    <p class="control-note" id="preset-description">A two impulse Hohmann raise from a 400 km parking orbit to geostationary radius.</p>
+  </section>
+
+  <section class="panel-grid" aria-label="Mission visualizations">
+
+    <article class="card card-wide" aria-labelledby="trajectory-title">
+      <div class="card-head">
+        <div><h2 id="trajectory-title">Trajectory visualizer</h2><p class="card-sub" id="trajectory-sub">Orbital plane with velocity vector, apsides and burn markers</p></div>
+        <div class="legend" id="trajectory-legend" aria-label="Trajectory legend"></div>
+      </div>
+      <div class="chart-frame">
+        <svg id="trajectory-svg" class="viz-svg" viewBox="0 0 760 420" role="img" aria-labelledby="trajectory-title trajectory-desc" preserveAspectRatio="xMidYMid meet">
+          <desc id="trajectory-desc">Orbit path, central body, spacecraft, velocity vector and apsis markers. The matching data table follows the chart.</desc>
+        </svg>
+        <div id="trajectory-tooltip" class="tooltip" role="status" aria-live="polite" hidden></div>
+      </div>
+      <details class="table-twin">
+        <summary>Trajectory data table</summary>
+        <div class="table-scroll"><table id="trajectory-table"><caption>Sampled orbit points with radius, speed and true anomaly</caption></table></div>
+      </details>
+    </article>
+
+    <article class="card" aria-labelledby="transfer-title">
+      <div class="card-head"><div><h2 id="transfer-title">Transfer budget</h2><p class="card-sub">Impulse magnitude by burn</p></div></div>
+      <div class="chart-frame">
+        <svg id="transfer-svg" class="viz-svg" viewBox="0 0 420 270" role="img" aria-labelledby="transfer-title transfer-desc" preserveAspectRatio="xMidYMid meet">
+          <desc id="transfer-desc">Horizontal bars showing the delta v of each maneuver burn.</desc>
+        </svg>
+        <div id="transfer-tooltip" class="tooltip" role="status" aria-live="polite" hidden></div>
+      </div>
+      <details class="table-twin">
+        <summary>Transfer budget table</summary>
+        <div class="table-scroll"><table id="transfer-table"><caption>Per burn delta v and cumulative total</caption></table></div>
+      </details>
+    </article>
+
+    <article class="card" aria-labelledby="staging-title">
+      <div class="card-head"><div><h2 id="staging-title">Staging breakdown</h2><p class="card-sub">Tsiolkovsky delta v per stage</p></div><div class="legend" id="staging-legend"></div></div>
+      <div class="chart-frame">
+        <svg id="staging-svg" class="viz-svg" viewBox="0 0 420 270" role="img" aria-labelledby="staging-title staging-desc" preserveAspectRatio="xMidYMid meet">
+          <desc id="staging-desc">Stage by stage delta v bars with a cumulative line.</desc>
+        </svg>
+        <div id="staging-tooltip" class="tooltip" role="status" aria-live="polite" hidden></div>
+      </div>
+      <details class="table-twin">
+        <summary>Staging data table</summary>
+        <div class="table-scroll"><table id="staging-table"><caption>Stage masses, mass ratios and cumulative delta v</caption></table></div>
+      </details>
+    </article>
+
+    <article class="card card-wide" aria-labelledby="porkchop-title">
+      <div class="card-head">
+        <div><h2 id="porkchop-title">Porkchop grid</h2><p class="card-sub" id="porkchop-sub">Departure epoch versus time of flight, total delta v</p></div>
+        <div class="legend legend-scale" id="porkchop-legend" aria-label="Sequential scale legend"></div>
+      </div>
+      <div class="chart-frame">
+        <svg id="porkchop-svg" class="viz-svg" viewBox="0 0 760 420" role="img" aria-labelledby="porkchop-title porkchop-desc" preserveAspectRatio="xMidYMid meet">
+          <desc id="porkchop-desc">Heatmap of total delta v across departure days and flight days. The crosshair inspector reads a single cell. The matching data table follows the chart.</desc>
+        </svg>
+        <div id="porkchop-tooltip" class="tooltip" role="status" aria-live="polite" hidden></div>
+      </div>
+      <div class="inspector" id="porkchop-inspector" aria-live="polite"></div>
+      <details class="table-twin">
+        <summary>Porkchop grid data table</summary>
+        <div class="table-scroll"><table id="porkchop-table"><caption>Grid cells with departure day, flight day, C3 and delta v values</caption></table></div>
+      </details>
+    </article>
+
+    <article class="card card-wide" aria-labelledby="energy-title">
+      <div class="card-head">
+        <div><h2 id="energy-title">RK4 propagation and J2 precession</h2><p class="card-sub" id="energy-sub">Specific energy drift and secular node rate over one orbit</p></div>
+        <div class="legend" id="energy-legend"></div>
+      </div>
+      <div class="chart-frame">
+        <svg id="energy-svg" class="viz-svg" viewBox="0 0 760 300" role="img" aria-labelledby="energy-title energy-desc" preserveAspectRatio="xMidYMid meet">
+          <desc id="energy-desc">Line chart of relative specific energy drift over time with a marker at the maximum drift. The matching data table follows the chart.</desc>
+        </svg>
+        <div id="energy-tooltip" class="tooltip" role="status" aria-live="polite" hidden></div>
+      </div>
+      <div class="metric-strip" id="propagation-metrics" aria-label="Propagation metrics"></div>
+      <details class="table-twin">
+        <summary>Propagation data table</summary>
+        <div class="table-scroll"><table id="energy-table"><caption>Sampled propagation states and energy drift</caption></table></div>
+      </details>
+    </article>
+
+  </section>
+
+  <section class="reference-card" aria-labelledby="reference-title">
+    <h2 id="reference-title">Engine reference</h2>
+    <p>Units are SI. Classical elements use radians. The same <code>orbit.js</code> module powers this page and <code>node --test test.js</code>.</p>
+    <div class="reference-grid" id="reference-grid"></div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <p>OrbitLab is MIT licensed. Built for students, mission designers and anyone who wants the equations visible.</p>
+  <p><a href="https://github.com/draarivpatel-ui/orbitlab" target="_blank" rel="noopener noreferrer">Repository</a> / <a href="https://github.com/draarivpatel-ui/orbitlab/releases/tag/v1.0.0" target="_blank" rel="noopener noreferrer">Release v1.0.0</a></p>
+</footer>
+
+<div id="download-status" class="sr-only" role="status" aria-live="polite"></div>
+<script src="orbit.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
