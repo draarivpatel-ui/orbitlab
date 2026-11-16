@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark light">
-<meta name="description" content="OrbitLab: offline astrodynamics and trajectory analysis console for Keplerian orbits, Hohmann and bi-elliptic transfers, universal-variable Lambert porkchop contours, RK4 J2 propagation, and NASA GMAT / CCSDS OEM exports.">
+<meta name="description" content="OrbitLab: offline astrodynamics and trajectory analysis console for Keplerian orbits, Hohmann and bi-elliptic transfers, universal-variable Lambert porkchop contours, adaptive RK45 J2 propagation, and NASA GMAT / CCSDS OEM exports.">
 <meta name="theme-color" content="#0c0f12">
 <title>OrbitLab | Astrodynamics &amp; Trajectory Analysis Console</title>
 <link rel="stylesheet" href="style.css">
@@ -26,13 +26,13 @@
     <div class="brand-text">
       <div class="brand-title-row">
         <h1>OrbitLab</h1>
-        <span class="console-tag">FDN-CONSOLE v1.0.0</span>
+        <span class="console-tag">MISSION WORKBENCH</span>
       </div>
-      <p class="brand-sub">Flight Dynamics &amp; Trajectory Analysis Workbench (SI / ICRF / EME2000)</p>
+      <p class="brand-sub">Explore a mission. Inspect the physics. Export the evidence.</p>
     </div>
   </div>
   <div class="header-actions">
-    <span class="status-readout">Kernel: orbit.js UMD (offline)</span>
+    <span class="status-readout">Local calculations / no network</span>
     <button id="theme-toggle" class="console-button" type="button" aria-pressed="true" aria-label="Switch to light plotting sheet">
       <span class="theme-label">Theme: Dark console</span>
     </button>
@@ -40,7 +40,18 @@
   </div>
 </header>
 
-<main id="workspace">
+<main id="workspace" tabindex="-1">
+  <section class="mission-intro" aria-labelledby="mission-intro-title">
+    <div><p class="eyebrow">FLIGHT DYNAMICS / MISSION DESIGN</p><h2 id="mission-intro-title">Plan the burn. Prove the orbit.</h2><p>Five missions, one shared physics engine. Every state and maneuver is yours to inspect.</p></div>
+    <span id="verification-status" class="verification-badge" role="status">Checking numerical precision</span>
+  </section>
+  <section class="showcase-grid" aria-label="One click mission showcases">
+    <button type="button" class="mission-card" data-mission="leo-geo-comms" aria-pressed="true"><span>01 / CONNECT</span><strong>Reach geostationary orbit</strong><small>Two burns. Inspect the delta-v budget.</small></button>
+    <button type="button" class="mission-card" data-mission="sun-sync-eo1" aria-pressed="false"><span>02 / OBSERVE</span><strong>Follow the Sun with J2</strong><small>Nodal drift meets 0.9856 deg/day.</small></button>
+    <button type="button" class="mission-card" data-mission="molniya-12h" aria-pressed="false"><span>03 / DWELL</span><strong>Ride a Molniya ellipse</strong><small>Watch speed change at e = 0.72.</small></button>
+    <button type="button" class="mission-card" data-mission="earth-mars-rendezvous" aria-pressed="false"><span>04 / RENDEZVOUS</span><strong>Find a Mars launch window</strong><small>780 Lambert cells. Verify an arrival.</small></button>
+    <button type="button" class="mission-card" data-mission="bi-elliptic-deep-space" aria-pressed="false"><span>05 / OPTIMIZE</span><strong>Spend less with three burns</strong><small>Compare bi-elliptic and Hohmann.</small></button>
+  </section>
   <section class="telemetry-bar" aria-label="Active mission telemetry summary">
     <div class="telemetry-cell telemetry-cell-wide">
       <span class="telemetry-key">Active mission profile</span>
@@ -107,12 +118,14 @@
       </div>
       <div class="control-group export-group" role="group" aria-label="Export flight dynamics files">
         <span class="export-label">Export telemetry:</span>
-        <button id="download-gmat" class="console-button" type="button">GMAT .script</button>
-        <button id="download-oem" class="console-button" type="button">CCSDS 2.0 .oem</button>
-        <button id="download-csv" class="console-button" type="button">State .csv</button>
+        <button id="download-gmat" class="console-button" type="button">Reference .script</button>
+        <button id="download-oem" class="console-button" type="button">Reference .oem</button>
+        <button id="download-csv" class="console-button" type="button">Reference .csv</button>
       </div>
     </div>
   </section>
+
+  <section class="verification-grid" id="verification-grid" aria-label="Live numerical verification"></section>
 
   <section class="panel-grid" aria-label="Trajectory plots and solver telemetry">
 
@@ -125,7 +138,7 @@
         <div class="legend" id="trajectory-legend" aria-label="Trajectory legend"></div>
       </div>
       <div class="chart-frame">
-        <svg id="trajectory-svg" class="viz-svg" viewBox="0 0 760 420" role="img" aria-labelledby="trajectory-title trajectory-desc" preserveAspectRatio="xMidYMid meet">
+        <svg id="trajectory-svg" class="viz-svg" viewBox="0 0 760 420" role="group" tabindex="0" aria-label="Orbit inspector. Use left and right arrows to scrub the spacecraft." aria-labelledby="trajectory-title trajectory-desc" preserveAspectRatio="xMidYMid meet">
           <desc id="trajectory-desc">Technical orbital plot showing central body, parking orbit, transfer arcs, apsis markers, velocity vector, and scrubbed spacecraft state.</desc>
         </svg>
         <div id="trajectory-tooltip" class="tooltip" role="status" aria-live="polite" hidden></div>
@@ -154,6 +167,7 @@
         <div id="porkchop-tooltip" class="tooltip" role="status" aria-live="polite" hidden></div>
       </div>
       <div class="inspector" id="porkchop-inspector" aria-live="polite"></div>
+      <div class="arrival-check"><button type="button" id="verify-lambert" class="console-button">Verify selected arrival</button><output id="lambert-check" aria-live="polite">Select a grid cell and verify its arrival with independent integration.</output></div>
       <details class="table-twin">
         <summary>Porkchop Lambert grid data table</summary>
         <div class="table-scroll">
@@ -208,22 +222,22 @@
     <article class="panel panel-wide" aria-labelledby="energy-title">
       <div class="panel-head">
         <div>
-          <h2 id="energy-title">RK4 Numerical Integrator &amp; J2 Secular Nodal Precession</h2>
+          <h2 id="energy-title">Adaptive RK45 &amp; Conserved Energy</h2>
           <p class="panel-sub" id="energy-sub">Relative specific mechanical energy drift (dE/E0) and secular RAAN / argument of periapsis drift rates</p>
         </div>
         <div class="legend" id="energy-legend"></div>
       </div>
       <div class="chart-frame">
         <svg id="energy-svg" class="viz-svg" viewBox="0 0 760 290" role="img" aria-labelledby="energy-title energy-desc" preserveAspectRatio="xMidYMid meet">
-          <desc id="energy-desc">Technical line plot of relative specific energy drift over one orbital period under 4th-order Runge-Kutta integration.</desc>
+          <desc id="energy-desc">Technical line plot of relative specific energy drift over one orbital period under adaptive Runge-Kutta integration.</desc>
         </svg>
         <div id="energy-tooltip" class="tooltip" role="status" aria-live="polite" hidden></div>
       </div>
       <div class="metric-strip" id="propagation-metrics" aria-label="Propagator and J2 secular metrics"></div>
       <details class="table-twin">
-        <summary>RK4 propagation state history table</summary>
+        <summary>RK45 propagation state history table</summary>
         <div class="table-scroll">
-          <table id="energy-table"><caption>Sampled RK4 integration steps with radius, speed, specific energy, and relative energy drift</caption></table>
+          <table id="energy-table"><caption>Sampled RK45 integration steps with radius, speed, specific energy, and relative energy drift</caption></table>
         </div>
       </details>
     </article>
@@ -234,7 +248,7 @@
     <div class="panel-head">
       <div>
         <h2 id="reference-title">Keplerian Elements &amp; Dynamical Invariants</h2>
-        <p class="panel-sub">SI units (m, m/s, kg, s, rad). Computed directly by <code>orbit.js</code> and verified by 125 tests in <code>node --test test.js</code>.</p>
+        <p class="panel-sub">SI units throughout the calculations. Live checks measure solver residuals, state reconstruction, and conserved energy.</p>
       </div>
     </div>
     <div class="reference-grid" id="reference-grid"></div>
@@ -242,8 +256,8 @@
 </main>
 
 <footer class="site-footer">
-  <p>OrbitLab Astrodynamics Workbench (MIT License). Zero runtime dependencies; deterministic UMD kernel in <code>orbit.js</code>.</p>
-  <p><a href="https://github.com/draarivpatel-ui/orbitlab" target="_blank" rel="noopener noreferrer">GitHub Repository</a> | <a href="https://github.com/draarivpatel-ui/orbitlab/releases/tag/v1.0.0" target="_blank" rel="noopener noreferrer">Release v1.0.0</a></p>
+  <p>OrbitLab Astrodynamics Workbench (MIT License). All calculations stay on this device. No setup, account, or external assets.</p>
+  <p><a href="https://github.com/draarivpatel-ui/orbitlab" target="_blank" rel="noopener noreferrer">GitHub Repository</a></p>
 </footer>
 
 <div id="download-status" class="sr-only" role="status" aria-live="polite"></div>

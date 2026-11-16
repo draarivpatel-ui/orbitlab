@@ -40,7 +40,23 @@
     return typeof value === 'number' && isFinite(value) ? value : fallback;
   }
 
-  function vec(x) { return [num(x[0], 0), num(x[1], 0), num(x[2], 0)]; }
+  function finiteInput(value, name) {
+    if (typeof value !== 'number' || !isFinite(value)) throw new RangeError(name + ' must be finite.');
+    return value;
+  }
+  function positive(value, name) {
+    finiteInput(value, name);
+    if (!(value > 0)) throw new RangeError(name + ' must be positive.');
+    return value;
+  }
+  function optional(value, fallback, name) {
+    return value === undefined ? fallback : finiteInput(value, name);
+  }
+  function gravityParameter(mu) { return positive(mu === undefined ? CONSTANTS.MU_EARTH : mu, 'Gravitational parameter'); }
+  function vec(x) {
+    if (!x || x.length !== 3) throw new RangeError('State vectors need three finite components.');
+    return [finiteInput(x[0], 'Vector component'), finiteInput(x[1], 'Vector component'), finiteInput(x[2], 'Vector component')];
+  }
   function add(a, b) { return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]; }
   function sub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
   function scale(a, k) { return [a[0] * k, a[1] * k, a[2] * k]; }
@@ -80,16 +96,26 @@
    * near parabolic cases converge instead of overshooting.
    */
   function solveKepler(M, e, tol) {
-    tol = (typeof tol === 'number' && tol > 0) ? tol : 1e-12;
-    if (!isFinite(M)) throw new RangeError('Mean anomaly must be finite.');
-    if (!(e >= 0)) throw new RangeError('Eccentricity must be non negative.');
+    tol = tol === undefined ? 1e-12 : positive(tol, 'Kepler tolerance');
+    if (typeof M !== 'number' || !isFinite(M)) throw new RangeError('Mean anomaly must be finite.');
+    if (typeof e !== 'number' || !isFinite(e) || !(e >= 0)) throw new RangeError('Eccentricity must be non negative.');
     if (e === 1) throw new RangeError('Parabolic orbits have no Kepler anomaly.');
+    function ellipticValue(E, ecc) {
+      var d = Math.abs(E) < 1e-3 ? E * E * E * (1/6 - E * E / 120 + Math.pow(E, 4) / 5040) : E - Math.sin(E);
+      return (1 - ecc) * E + ecc * d;
+    }
+    function hyperbolicValue(H, ecc) {
+      var d = Math.abs(H) < 1e-3 ? H * H * H * (1/6 + H * H / 120 + Math.pow(H, 4) / 5040) : Math.sinh(H) - H;
+      return (ecc - 1) * H + ecc * d;
+    }
     var maxIterations = 120;
     var iterations = 0;
     var anomaly, trueAnomaly, residual, i, f, fp, next, lo, hi;
 
     if (e < 1) {
-      var Mn = ((M + Math.PI) % TAU + TAU) % TAU - Math.PI;
+      var Mn = M % TAU;
+      if (Mn > Math.PI) Mn -= TAU;
+      if (Mn < -Math.PI) Mn += TAU;
       var denom = 1 - Math.sin(Mn + e) + Math.sin(Mn);
       var E = Math.abs(denom) > 1e-8
         ? Mn + e * Math.sin(Mn) / denom
@@ -99,18 +125,18 @@
       E = clamp(E, lo, hi);
       for (i = 0; i < maxIterations; i++) {
         iterations = i + 1;
-        f = E - e * Math.sin(E) - Mn;
+        f = ellipticValue(E, e) - Mn;
         residual = Math.abs(f);
-        if (residual <= tol) break;
+        fp = (1 - e) + 2 * e * Math.pow(Math.sin(E / 2), 2);
+        if (residual <= tol && Math.abs(f / fp) <= tol * (1 + Math.abs(E))) break;
         if (f > 0) hi = E; else lo = E;
-        fp = 1 - e * Math.cos(E);
         next = E - f / fp;
         if (!isFinite(next) || !(next > lo && next < hi)) next = 0.5 * (lo + hi);
         if (Math.abs(next - E) <= tol * 0.25) { E = next; break; }
         E = next;
       }
       anomaly = E;
-      residual = Math.abs(E - e * Math.sin(E) - Mn);
+      residual = Math.abs(ellipticValue(E, e) - Mn);
       trueAnomaly = 2 * Math.atan2(
         Math.sqrt(1 + e) * Math.sin(E / 2),
         Math.sqrt(1 - e) * Math.cos(E / 2)
@@ -128,15 +154,15 @@
       lo = 0;
       hi = Math.max(0.5, Math.asinh(Ma / e) + 0.5);
       var guard = 0;
-      while (e * Math.sinh(hi) - hi - Ma < 0 && hi < 350 && guard < 60) { hi *= 1.6; guard++; }
+      while (hyperbolicValue(hi, e) - Ma < 0 && hi < 350 && guard < 60) { hi *= 1.6; guard++; }
       H = clamp(Math.asinh(Ma / e), 0, hi);
       for (i = 0; i < maxIterations; i++) {
         iterations = i + 1;
-        f = e * Math.sinh(H) - H - Ma;
+        f = hyperbolicValue(H, e) - Ma;
         residual = Math.abs(f);
-        if (residual <= tol) break;
+        fp = (e - 1) + 2 * e * Math.pow(Math.sinh(H / 2), 2);
+        if (residual <= tol * Math.max(1, Ma) && Math.abs(f / fp) <= tol * (1 + H)) break;
         if (f > 0) hi = H; else lo = H;
-        fp = e * Math.cosh(H) - 1;
         next = H - f / fp;
         if (!isFinite(next) || !(next > lo && next < hi)) next = 0.5 * (lo + hi);
         if (Math.abs(next - H) <= tol * 0.25) { H = next; break; }
@@ -144,7 +170,7 @@
       }
     }
     anomaly = sign * H;
-    residual = Math.abs(e * Math.sinh(H) - H - Ma);
+    residual = Math.abs(hyperbolicValue(H, e) - Ma);
     trueAnomaly = 2 * Math.atan(Math.sqrt((e + 1) / (e - 1)) * Math.tanh(anomaly / 2));
     return {
       anomaly: anomaly, trueAnomaly: trueAnomaly, iterations: iterations,
@@ -163,7 +189,7 @@
     var ra = e < 1 ? p / (1 - e) : null;
     var vp = Math.sqrt(Math.max(0, mu * (2 / rp - 1 / a)));
     var va = ra !== null ? Math.sqrt(Math.max(0, mu * (2 / ra - 1 / a))) : null;
-    var periodSec = a > 0 ? TAU * Math.sqrt(a * a * a / mu) : null;
+    var periodSec = a > 0 && e < 1 && isFinite(a) ? TAU * Math.sqrt(a * a * a / mu) : null;
     return {
       specificEnergy: energy,
       h: h,
@@ -184,16 +210,20 @@
 
   /* Classical elements to Cartesian state. Elements: { a, e, i, raan, argPe, nu }. */
   function elementsToState(elements, mu) {
-    mu = num(mu, CONSTANTS.MU_EARTH);
+    mu = gravityParameter(mu);
+    if (!elements || typeof elements !== 'object') throw new RangeError('Orbital elements are required.');
     var a = elements.a;
     var e = elements.e;
-    var inc = num(elements.i, 0);
-    var raan = num(elements.raan, 0);
-    var argPe = num(elements.argPe, 0);
-    var nu = num(elements.nu, 0);
-    if (!(a > 0) && !(a < 0)) throw new RangeError('Semi major axis must be finite and non zero.');
-    if (!(e >= 0)) throw new RangeError('Eccentricity must be non negative.');
+    var inc = optional(elements.i, 0, 'Inclination');
+    var raan = optional(elements.raan, 0, 'Ascending node');
+    var argPe = optional(elements.argPe, 0, 'Periapsis argument');
+    var nu = optional(elements.nu, 0, 'True anomaly');
+    if (!isFinite(a) || typeof a !== 'number' || a === 0) throw new RangeError('Semi major axis must be finite and non zero.');
+    if (typeof e !== 'number' || !isFinite(e) || !(e >= 0)) throw new RangeError('Eccentricity must be non negative.');
     var p = a * (1 - e * e);
+    if (!(p > 0) || e === 1) throw new RangeError('Axis sign and eccentricity must describe an elliptic or hyperbolic conic.');
+    if (!(inc >= 0 && inc <= Math.PI)) throw new RangeError('Inclination must be between zero and pi.');
+    if (!(1 + e * Math.cos(nu) > 0)) throw new RangeError('True anomaly is outside the physical conic.');
     var radius = p / (1 + e * Math.cos(nu));
     var k = Math.sqrt(mu / p);
     var rPqw = [radius * Math.cos(nu), radius * Math.sin(nu), 0];
@@ -209,7 +239,7 @@
 
   /* Cartesian state to classical elements. Handles circular and equatorial orbits. */
   function stateToElements(rVec, vVec, mu) {
-    mu = num(mu, CONSTANTS.MU_EARTH);
+    mu = gravityParameter(mu);
     var r = vec(rVec), v = vec(vVec);
     var rmag = norm(r);
     if (rmag === 0) throw new RangeError('Position vector must be non zero.');
@@ -224,10 +254,10 @@
     var e = norm(eVec);
     var n = [-h[1], h[0], 0];
     var nmag = norm(n);
-    var inc = Math.acos(clamp(h[2] / hmag, -1, 1));
+    var inc = Math.atan2(nmag, h[2]);
     var raan, argPe, nu;
 
-    if (nmag > 1e-12) {
+    if (nmag / hmag > 1e-12) {
       raan = Math.atan2(n[1], n[0]);
       if (e > 1e-12) {
         var ne = dot(n, eVec) / (nmag * e);
@@ -238,20 +268,20 @@
       }
     } else {
       raan = 0;
-      argPe = e > 1e-12 ? Math.atan2(eVec[1], eVec[0]) : 0;
+      argPe = e > 1e-12 ? Math.atan2((h[2] < 0 ? -1 : 1) * eVec[1], eVec[0]) : 0;
     }
 
     if (e > 1e-12) {
       var er = dot(eVec, r) / (e * rmag);
       var erh = dot(cross(eVec, r), h) / (e * hmag * rmag);
       nu = Math.atan2(erh, er);
-    } else if (nmag > 1e-12) {
+    } else if (nmag / hmag > 1e-12) {
       /* Circular inclined orbit: true anomaly becomes argument of latitude. */
-      nu = Math.atan2(r[2] / Math.sin(inc), dot(r, normalize(n)));
+      nu = Math.atan2(dot(cross(n, r), h) / (nmag * hmag), dot(n, r) / nmag);
       argPe = 0;
     } else {
       /* Circular equatorial orbit: true longitude is the only angle left. */
-      nu = Math.atan2(r[1], r[0]);
+      nu = Math.atan2((h[2] < 0 ? -1 : 1) * r[1], r[0]);
       argPe = 0;
       raan = 0;
     }
@@ -269,8 +299,8 @@
 
   /* Two-impulse Hohmann transfer between coplanar circular orbits. */
   function hohmannTransfer(r1, r2, mu) {
-    mu = num(mu, CONSTANTS.MU_EARTH);
-    if (!(r1 > 0) || !(r2 > 0)) throw new RangeError('Orbit radii must be positive.');
+    mu = gravityParameter(mu);
+    if (!isFinite(r1) || !isFinite(r2) || !(r1 > 0) || !(r2 > 0)) throw new RangeError('Orbit radii must be positive.');
     var at = (r1 + r2) / 2;
     var et = Math.abs(r2 - r1) / (r1 + r2);
     var v1 = Math.sqrt(mu / r1);
@@ -285,14 +315,17 @@
       transferSemiMajorAxis: at, transferEccentricity: et,
       timeOfFlightSec: Math.PI * Math.sqrt(at * at * at / mu),
       circularSpeed1: v1, circularSpeed2: v2,
-      transferPeriapsisSpeed: vp, transferApoapsisSpeed: va
+      departureTransferSpeed: vp, arrivalTransferSpeed: va,
+      signedDv1: vp - v1, signedDv2: v2 - va,
+      transferPeriapsisSpeed: Math.max(vp, va), transferApoapsisSpeed: Math.min(vp, va)
     };
   }
 
   /* Three-impulse bi-elliptic transfer via an intermediate radius rb. */
   function biEllipticTransfer(r1, r2, rb, mu) {
-    mu = num(mu, CONSTANTS.MU_EARTH);
-    if (!(r1 > 0) || !(r2 > 0) || !(rb > 0)) throw new RangeError('Orbit radii must be positive.');
+    mu = gravityParameter(mu);
+    if (!isFinite(r1) || !isFinite(r2) || !isFinite(rb) || !(r1 > 0) || !(r2 > 0) || !(rb > 0)) throw new RangeError('Orbit radii must be positive.');
+    if (rb < Math.max(r1, r2)) throw new RangeError('Intermediate apsis must reach both circular orbits.');
     var a1 = (r1 + rb) / 2;
     var a2 = (r2 + rb) / 2;
     var v1 = Math.sqrt(mu / r1);
@@ -319,7 +352,7 @@
       semiMajorAxis1: a1, semiMajorAxis2: a2,
       hohmannTotalDv: hohmann.totalDv,
       savingsDv: hohmann.totalDv - totalDv,
-      savingsPercent: 100 * (hohmann.totalDv - totalDv) / hohmann.totalDv,
+      savingsPercent: hohmann.totalDv > 0 ? 100 * (hohmann.totalDv - totalDv) / hohmann.totalDv : 0,
       radiusRatio: ratio,
       criticalRatio: CONSTANTS.CRITICAL_BI_ELLIPTIC_RATIO,
       aboveCriticalRatio: ratio > CONSTANTS.CRITICAL_BI_ELLIPTIC_RATIO,
@@ -332,7 +365,9 @@
   function combinedPlaneChange(v1, v2, deltaIncRad) {
     var s1 = (typeof v1 === 'number') ? v1 : norm(vec(v1));
     var s2 = (typeof v2 === 'number') ? v2 : norm(vec(v2));
-    var di = Math.abs(num(deltaIncRad, 0));
+    finiteInput(s1, 'Speed'); finiteInput(s2, 'Speed');
+    if (s1 < 0 || s2 < 0) throw new RangeError('Speeds must be non negative.');
+    var di = Math.acos(clamp(Math.cos(optional(deltaIncRad, 0, 'Plane change')), -1, 1));
     var combinedDv = Math.sqrt(Math.max(0, s1 * s1 + s2 * s2 - 2 * s1 * s2 * Math.cos(di)));
     var speedChange = Math.abs(s2 - s1);
     var splitTurn = 2 * Math.min(s1, s2) * Math.sin(di / 2);
@@ -374,17 +409,18 @@
 
   /* Universal variable Lambert boundary value solver, zero revolutions. */
   function solveLambert(r1Vec, r2Vec, dtSec, mu, prograde) {
-    mu = num(mu, CONSTANTS.MU_EARTH);
+    mu = gravityParameter(mu);
     if (prograde === undefined) prograde = true;
     var r1v = vec(r1Vec), r2v = vec(r2Vec);
     var r1 = norm(r1v), r2 = norm(r2v);
-    if (!(r1 > 0) || !(r2 > 0) || !(dtSec > 0)) {
+    if (!(r1 > 0) || !(r2 > 0) || !isFinite(dtSec) || !(dtSec > 0)) {
       throw new RangeError('Lambert needs two nonzero position vectors and a positive flight time.');
     }
     var cosDnu = clamp(dot(r1v, r2v) / (r1 * r2), -1, 1);
     var crossZ = cross(r1v, r2v)[2];
     var shortWay = prograde ? crossZ >= 0 : crossZ < 0;
     var dnu = shortWay ? Math.acos(cosDnu) : TAU - Math.acos(cosDnu);
+    if (cosDnu > 1 - 1e-14) throw new RangeError('Collinear same-direction Lambert endpoints need a specified transfer plane.');
     var sinDnu = Math.sin(dnu);
     var sqrtMu = Math.sqrt(mu);
     var iterations = 0;
@@ -396,13 +432,16 @@
       var tof = Math.PI * Math.sqrt(at * at * at / mu);
       var rp = Math.min(r1, r2), ra = Math.max(r1, r2);
       var et = (ra - rp) / (ra + rp);
-      var hhat = prograde ? [0, 0, 1] : [0, 0, -1];
+      var radial = normalize(r1v);
+      var ref = Math.abs(radial[2]) < 0.9 ? [0, 0, 1] : [0, 1, 0];
+      var hhat = normalize(sub(ref, scale(radial, dot(ref, radial))));
+      if (!prograde) hhat = scale(hhat, -1);
       var t1 = normalize(cross(hhat, r1v));
       var t2 = normalize(cross(hhat, r2v));
       var vp = Math.sqrt(Math.max(0, mu * (2 / r1 - 1 / at)));
       var va = Math.sqrt(Math.max(0, mu * (2 / r2 - 1 / at)));
       var v1 = scale(t1, vp), v2 = scale(t2, va);
-      converged = Math.abs(dtSec - tof) <= Math.max(1e-3, 0.02 * tof);
+      converged = Math.abs(dtSec - tof) <= Math.max(1e-7, 1e-11 * tof);
       return {
         v1: v1, v2: v2, a: at, p: at * (1 - et * et),
         iterations: 1, converged: converged,
@@ -423,30 +462,41 @@
       return { ok: true, y: y, x: x, C: cs.C, S: cs.S, f: f, z: z };
     }
 
-    /* Scan the universal variable range, then bracket any sign change and bisect. */
-    var zHigh = TAU * TAU - 1e-5;
-    var samples = [];
-    var si;
-    for (si = 0; si <= 480; si++) {
-      var zz = -16 + (zHigh + 16) * si / 480;
-      var ev = evaluate(zz);
-      iterations++;
-      if (ev.ok) samples.push(ev);
+    /* Monotone time-of-flight bracket, including the positive-y boundary for
+     * very short hyperbolic transfers. No coarse scan can skip a valid root. */
+    var zero = evaluate(0), lower = zero, upper = zero, trial;
+    iterations++;
+    if (!zero.ok) throw new RangeError('Lambert geometry is numerically singular.');
+    if (zero.f >= 0) {
+      var zLow = -1;
+      for (var search = 0; search < 60; search++) {
+        trial = evaluate(zLow); iterations++;
+        if (trial.ok && trial.f <= 0) { lower = trial; break; }
+        if (!trial.ok) {
+          var invalidZ = zLow, validZ = lower.z;
+          for (var refine = 0; refine < 100; refine++) {
+            trial = evaluate((invalidZ + validZ) / 2); iterations++;
+            if (!trial.ok) invalidZ = trial.z;
+            else if (trial.f <= 0) { lower = trial; break; }
+            else { validZ = trial.z; lower = trial; }
+          }
+          break;
+        }
+        lower = trial; zLow *= 2;
+      }
+    } else {
+      var pole = TAU * TAU;
+      for (var grow = 1; grow <= 45; grow++) {
+        trial = evaluate(pole * (1 - Math.pow(0.5, grow))); iterations++;
+        if (trial.ok && trial.f >= 0) { upper = trial; break; }
+      }
     }
-    if (samples.length < 2 || !(samples[0].f < 0) || !(samples[samples.length - 1].f > 0)) {
-      return { v1: [0, 0, 0], v2: [0, 0, 0], a: Infinity, p: Infinity, iterations: iterations,
-        converged: false, transferAngleRad: dnu, prograde: prograde, residual: Infinity };
+    if (!(lower.ok && upper.ok && lower.f <= 0 && upper.f >= 0)) {
+      return { v1: [0, 0, 0], v2: [0, 0, 0], a: Infinity, p: Infinity,
+        converged: false, iterations: iterations, residual: Infinity,
+        transferAngleRad: dnu, prograde: prograde, reason: 'No representable zero-revolution bracket.' };
     }
-    var bracket = null;
-    for (si = 0; si < samples.length - 1; si++) {
-      var before = samples[si], after = samples[si + 1];
-      if (before.f >= 0 && after.f <= 0) { bracket = [before, after]; break; }
-      if (before.f <= 0 && after.f >= 0) { bracket = [before, after]; break; }
-    }
-    if (!bracket) {
-      return { v1: [0, 0, 0], v2: [0, 0, 0], a: Infinity, p: Infinity, iterations: iterations,
-        converged: false, transferAngleRad: dnu, prograde: prograde, residual: Infinity };
-    }
+    var bracket = [lower, upper];
     var left = bracket[0], right = bracket[1];
     var mid = left;
     for (var k2 = 0; k2 < 120; k2++) {
@@ -574,7 +624,10 @@
     var theta2 = windowSpec.n2 * departureSec;
     var s1 = circularState(windowSpec.r1, theta1, windowSpec.i1, windowSpec.n1, windowSpec.mu);
     var s2 = circularState(windowSpec.r2, theta2 + windowSpec.n2 * flightSec, windowSpec.i2, windowSpec.n2, windowSpec.mu);
-    var lambert = solveLambert(s1.r, s2.r, flightSec, windowSpec.mu, prograde);
+    var lambert;
+    try { lambert = solveLambert(s1.r, s2.r, flightSec, windowSpec.mu, prograde); }
+    catch (err) { if (!(err instanceof RangeError)) throw err; lambert = { converged: false, v1: [0, 0, 0], v2: [0, 0, 0] }; }
+    if (!lambert.converged) return { c3: Infinity, dvDeparture: Infinity, dvArrival: Infinity, totalDv: Infinity, converged: false };
     var v1Inf = sub(lambert.v1, s1.v);
     var v2Inf = sub(lambert.v2, s2.v);
     var c3 = dot(v1Inf, v1Inf);
@@ -585,7 +638,7 @@
       totalDv: dvDeparture + dvArrival,
       converged: lambert.converged,
       a: lambert.a, p: lambert.p,
-      iterations: lambert.iterations,
+      iterations: lambert.iterations, residual: lambert.residual,
       departureVelocity: lambert.v1, arrivalVelocity: lambert.v2,
       r1: s1.r, r2: s2.r
     };
@@ -614,6 +667,12 @@
       flightSteps: clamp(Math.round(num(config.flightSteps, base.flightSteps)), 2, 80),
       description: base.description
     };
+    positive(w.r1, 'Departure radius'); positive(w.r2, 'Arrival radius'); gravityParameter(w.mu);
+    [w.departureDays, w.flightDays].forEach(function (range) {
+      if (!Array.isArray(range) || range.length !== 2 || !range.every(Number.isFinite) || range[1] < range[0])
+        throw new RangeError('Grid ranges need two finite ascending endpoints.');
+    });
+    if (w.flightDays[0] <= 0) throw new RangeError('Grid flight times must be positive.');
     var prograde = config.prograde !== false;
     var useLambert = config.method === 'lambert' ||
       (config.method !== 'analytic' && w.departureSteps * w.flightSteps <= 900);
@@ -679,18 +738,21 @@
           cell.dvArrival *= correction;
           cell.c3 = cell.dvDeparture * cell.dvDeparture;
         }
-        if (!isFinite(cell.totalDv)) cell.totalDv = 1e12;
+        if (!cell.converged || !isFinite(cell.totalDv)) cell.totalDv = Infinity;
         var record = {
           departureIndex: di, flightIndex: fi,
           departureSec: depSec, departureDay: depSec / CONSTANTS.DAY,
           timeOfFlightSec: flSec, timeOfFlightDay: flSec / CONSTANTS.DAY,
           c3: cell.c3, dvDeparture: cell.dvDeparture, dvArrival: cell.dvArrival,
-          totalDv: cell.totalDv, converged: cell.converged
+          totalDv: cell.totalDv, converged: cell.converged,
+          r1: cell.r1 || null, r2: cell.r2 || null,
+          departureVelocity: cell.departureVelocity || null, arrivalVelocity: cell.arrivalVelocity || null,
+          residual: cell.residual === undefined ? null : cell.residual
         };
         cells.push(record);
-        if (record.totalDv < minTotal) { minTotal = record.totalDv; best = record; }
-        if (record.c3 < minC3) { minC3 = record.c3; minC3Cell = record; }
-        if (record.totalDv < 1e11) maxTotal = Math.max(maxTotal, record.totalDv);
+        if (record.converged && record.totalDv < minTotal) { minTotal = record.totalDv; best = record; }
+        if (record.converged && record.c3 < minC3) { minC3 = record.c3; minC3Cell = record; }
+        if (record.converged && isFinite(record.totalDv)) maxTotal = Math.max(maxTotal, record.totalDv);
       }
     }
     return {
@@ -715,9 +777,12 @@
 
   /* J2 secular drift rates, in degrees per day. */
   function j2DriftRates(a, e, inc, mu, j2, bodyRadius) {
-    mu = num(mu, CONSTANTS.MU_EARTH);
-    j2 = num(j2, CONSTANTS.J2_EARTH);
-    bodyRadius = num(bodyRadius, CONSTANTS.R_EARTH);
+    mu = gravityParameter(mu);
+    j2 = optional(j2, CONSTANTS.J2_EARTH, 'Zonal harmonic');
+    bodyRadius = positive(bodyRadius === undefined ? CONSTANTS.R_EARTH : bodyRadius, 'Body radius');
+    positive(a, 'Secular semi major axis'); finiteInput(e, 'Secular eccentricity'); finiteInput(inc, 'Secular inclination');
+    if (!(e >= 0 && e < 1)) throw new RangeError('Secular J2 rates require an elliptic orbit.');
+    positive(bodyRadius, 'Body radius'); finiteInput(j2, 'Zonal harmonic');
     var p = a * (1 - e * e);
     var factor = 1.5 * j2 * bodyRadius * bodyRadius * Math.sqrt(mu) /
       (Math.pow(a, 3.5) * Math.pow(1 - e * e, 2));
@@ -739,11 +804,13 @@
    */
   function solveSunSyncInclination(a, e, options) {
     options = options || {};
-    var mu = num(options.mu, CONSTANTS.MU_EARTH);
-    var j2 = num(options.j2, CONSTANTS.J2_EARTH);
-    var bodyRadius = num(options.bodyRadius, CONSTANTS.R_EARTH);
-    var target = num(options.targetDriftDegPerDay, CONSTANTS.SUN_SYNC_DRIFT_DEG_PER_DAY);
-    var ecc = num(e, 0);
+    var mu = gravityParameter(options.mu);
+    var j2 = optional(options.j2, CONSTANTS.J2_EARTH, 'Zonal harmonic');
+    var bodyRadius = positive(options.bodyRadius === undefined ? CONSTANTS.R_EARTH : options.bodyRadius, 'Body radius');
+    var target = optional(options.targetDriftDegPerDay, CONSTANTS.SUN_SYNC_DRIFT_DEG_PER_DAY, 'Target drift');
+    var ecc = optional(e, 0, 'Secular eccentricity');
+    positive(a, 'Secular semi major axis');
+    if (!(ecc >= 0 && ecc < 1)) throw new RangeError('Sun synchronous rates require an elliptic orbit.');
     var magnitude = 1.5 * j2 * bodyRadius * bodyRadius * Math.sqrt(mu) /
       (Math.pow(a, 3.5) * Math.pow(1 - ecc * ecc, 2)) * CONSTANTS.DAY * DEG;
     var cosInc = -target / magnitude;
@@ -760,99 +827,150 @@
     };
   }
 
-  /* Fourth order Runge Kutta propagation of the two body plus J2 equations. */
-  function propagateRK4(r0, v0, dtSec, steps, options) {
+  function gravityOptions(options) {
     options = options || {};
-    var mu = num(options.mu, CONSTANTS.MU_EARTH);
-    var useJ2 = options.j2 !== 0 && options.j2 !== undefined;
-    var j2 = useJ2 ? num(options.j2, CONSTANTS.J2_EARTH) : 0;
-    var radiusBody = num(options.bodyRadius, CONSTANTS.R_EARTH);
-    var count = clamp(Math.round(num(steps, 100)), 1, 100000);
-    var total = num(dtSec, 0);
-    var stepSize = total / count;
-    var j2Factor = 1.5 * j2 * mu * radiusBody * radiusBody;
-
-    function accel(r) {
-      var x = r[0], y = r[1], z = r[2];
-      var r2 = x * x + y * y + z * z;
-      var rm = Math.sqrt(r2);
-      var k = -mu / (r2 * rm);
-      var ax = k * x, ay = k * y, az = k * z;
-      if (useJ2 && j2Factor !== 0) {
-        var q = j2Factor / (r2 * r2 * rm);
-        var s = 5 * z * z / r2;
-        ax += q * x * (s - 1);
-        ay += q * y * (s - 1);
-        az += q * z * (s - 3);
+    return { mu: gravityParameter(options.mu), j2: optional(options.j2, 0, 'Zonal harmonic'),
+      bodyRadius: positive(options.bodyRadius === undefined ? CONSTANTS.R_EARTH : options.bodyRadius, 'Body radius') };
+  }
+  function acceleration(r, physics) {
+    var x = r[0], y = r[1], z = r[2], r2 = dot(r, r), rm = Math.sqrt(r2);
+    if (!(rm > 0) || !isFinite(rm)) throw new RangeError('Propagation reached a singular position.');
+    var k = -physics.mu / (r2 * rm);
+    var q = 1.5 * physics.j2 * physics.mu * physics.bodyRadius * physics.bodyRadius / (r2 * r2 * rm);
+    var zz = 5 * z * z / r2;
+    return [k * x + q * x * (zz - 1), k * y + q * y * (zz - 1), k * z + q * z * (zz - 3)];
+  }
+  /* The J2 acceleration conserves kinetic energy plus its full potential.
+   * Kepler energy alone oscillates physically and is not an integration error. */
+  function specificEnergy(r, v, physics) {
+    var rm = norm(r), sin2 = r[2] * r[2] / (rm * rm);
+    return dot(v, v) / 2 - physics.mu / rm +
+      physics.mu * physics.j2 * physics.bodyRadius * physics.bodyRadius / (2 * rm * rm * rm) * (3 * sin2 - 1);
+  }
+  function stateDerivative(s, physics) {
+    var acc = acceleration(s.slice(0, 3), physics);
+    return [s[3], s[4], s[5], acc[0], acc[1], acc[2]];
+  }
+  function point(s, t, physics, initial, energyScale) {
+    var r = s.slice(0, 3), v = s.slice(3, 6), energy = specificEnergy(r, v, physics);
+    if (!s.every(Number.isFinite)) throw new RangeError('Propagation produced a non finite state.');
+    return { tSec: t, tDay: t / CONSTANTS.DAY, r: r, v: v, energy: energy,
+      twoBodyEnergy: dot(v, v) / 2 - physics.mu / norm(r),
+      energyDrift: (energy - initial) / energyScale, radius: norm(r), speed: norm(v) };
+  }
+  function propagationSummary(points, physics, total, method, rejected) {
+    var first = points[0], last = points[points.length - 1], e0 = first.energy;
+    var energyScale = Math.max(Math.abs(e0), physics.mu / first.radius * 1e-12);
+    var rates = { raanDriftDegPerDay: 0, argPeDriftDegPerDay: 0, meanMotionDriftDegPerDay: 0 };
+    var el = null;
+    if (norm(cross(first.r, first.v)) > 0) {
+      el = stateToElements(first.r, first.v, physics.mu);
+      if (el.a > 0 && el.e < 1 && physics.j2 !== 0)
+        rates = j2DriftRates(el.a, el.e, el.i, physics.mu, physics.j2, physics.bodyRadius);
+    }
+    return { points: points, trajectory: points, initialEnergy: e0, finalEnergy: last.energy,
+      energyScale: energyScale, energyDrift: last.energyDrift,
+      maxEnergyDrift: points.reduce(function (max, p) { return Math.max(max, Math.abs(p.energyDrift)); }, 0),
+      steps: points.length - 1, stepSizeSec: points.length > 1 ? total / (points.length - 1) : 0,
+      dtSec: total, mu: physics.mu, j2: physics.j2, bodyRadius: physics.bodyRadius,
+      j2Enabled: physics.j2 !== 0, method: method, rejectedSteps: rejected || 0,
+      raanDriftDegPerDay: rates.raanDriftDegPerDay, argPeDriftDegPerDay: rates.argPeDriftDegPerDay,
+      meanMotionDriftDegPerDay: rates.meanMotionDriftDegPerDay,
+      inclinationRad: el ? el.i : null, semiMajorAxis: el ? el.a : null };
+  }
+  function initialPropagation(r0, v0, options) {
+    var physics = gravityOptions(options), r = vec(r0), v = vec(v0);
+    positive(norm(r), 'Initial radius');
+    var initial = specificEnergy(r, v, physics);
+    return { physics: physics, state: r.concat(v), initial: initial,
+      energyScale: Math.max(Math.abs(initial), physics.mu / norm(r) * 1e-12) };
+  }
+  function propagateRK4(r0, v0, dtSec, steps, options) {
+    var setup = initialPropagation(r0, v0, options), s = setup.state, physics = setup.physics;
+    var total = finiteInput(dtSec, 'Propagation duration');
+    var count = steps === undefined ? 100 : steps;
+    if (!Number.isInteger(count) || count < 1 || count > 100000) throw new RangeError('RK4 needs 1 to 100000 integer steps.');
+    var h = total / count, points = [point(s, 0, physics, setup.initial, setup.energyScale)];
+    function shifted(k, factor) { return s.map(function (v, j) { return v + h * factor * k[j]; }); }
+    for (var i = 1; i <= count; i++) {
+      var k1 = stateDerivative(s, physics), k2 = stateDerivative(shifted(k1, 0.5), physics);
+      var k3 = stateDerivative(shifted(k2, 0.5), physics), k4 = stateDerivative(shifted(k3, 1), physics);
+      s = s.map(function (v, j) { return v + h * (k1[j] + 2 * k2[j] + 2 * k3[j] + k4[j]) / 6; });
+      points.push(point(s, i * h, physics, setup.initial, setup.energyScale));
+    }
+    return propagationSummary(points, physics, total, 'RK4', 0);
+  }
+  /* Dormand-Prince embedded 5(4) integration. The scaled error norm treats
+   * position and velocity separately and never silently accepts an oversized error. */
+  function propagateRK45(r0, v0, dtSec, options) {
+    options = options || {};
+    var setup = initialPropagation(r0, v0, options), s = setup.state, physics = setup.physics;
+    var total = finiteInput(dtSec, 'Propagation duration'), direction = total < 0 ? -1 : 1;
+    var relTol = positive(options.relativeTolerance === undefined ? 1e-10 : options.relativeTolerance, 'Relative tolerance');
+    var posTol = positive(options.positionTolerance === undefined ? 0.001 : options.positionTolerance, 'Position tolerance');
+    var velTol = positive(options.velocityTolerance === undefined ? 0.000001 : options.velocityTolerance, 'Velocity tolerance');
+    var maxSteps = options.maxSteps === undefined ? 20000 : options.maxSteps;
+    if (!Number.isInteger(maxSteps) || maxSteps < 1 || maxSteps > 100000) throw new RangeError('Adaptive step budget must be 1 to 100000.');
+    var maxH = options.maxStepSec === undefined ? Math.max(1, Math.abs(total) / 30) : positive(options.maxStepSec, 'Maximum step');
+    var h = direction * Math.min(maxH, Math.abs(total) / 100), t = 0, rejected = 0, attempts = 0;
+    var points = [point(s, 0, physics, setup.initial, setup.energyScale)];
+    var rows = [[], [1/5], [3/40, 9/40], [44/45, -56/15, 32/9],
+      [19372/6561, -25360/2187, 64448/6561, -212/729],
+      [9017/3168, -355/33, 46732/5247, 49/176, -5103/18656],
+      [35/384, 0, 500/1113, 125/192, -2187/6784, 11/84]];
+    var lowWeights = [5179/57600, 0, 7571/16695, 393/640, -92097/339200, 187/2100, 1/40];
+    while (direction * (total - t) > 0) {
+      if (++attempts > maxSteps) throw new RangeError('Adaptive step budget exhausted. Shorten the duration or relax the tolerance.');
+      if (Math.abs(h) > Math.abs(total - t)) h = total - t;
+      if (t + h === t) throw new RangeError('Adaptive step underflow.');
+      var ks = [];
+      for (var stage = 0; stage < 7; stage++) {
+        var temp = s.map(function (value, j) {
+          var delta = 0;
+          for (var k = 0; k < rows[stage].length; k++) delta += rows[stage][k] * ks[k][j];
+          return value + h * delta;
+        });
+        ks.push(stateDerivative(temp, physics));
       }
-      return [ax, ay, az];
-    }
-    function derivative(s) {
-      var a = accel([s[0], s[1], s[2]]);
-      return [s[3], s[4], s[5], a[0], a[1], a[2]];
-    }
-    function advance(s, h) {
-      var k1 = derivative(s);
-      var s2 = [], s3 = [], s4 = [], q;
-      for (q = 0; q < 6; q++) s2[q] = s[q] + 0.5 * h * k1[q];
-      var k2 = derivative(s2);
-      for (q = 0; q < 6; q++) s3[q] = s[q] + 0.5 * h * k2[q];
-      var k3 = derivative(s3);
-      for (q = 0; q < 6; q++) s4[q] = s[q] + h * k3[q];
-      var k4 = derivative(s4);
-      var out = [];
-      for (q = 0; q < 6; q++) out[q] = s[q] + h * (k1[q] + 2 * k2[q] + 2 * k3[q] + k4[q]) / 6;
-      return out;
-    }
-
-    var r = vec(r0), v = vec(v0);
-    var s = [r[0], r[1], r[2], v[0], v[1], v[2]];
-    var e0 = dot(v, v) / 2 - mu / norm(r);
-    var points = [{
-      tSec: 0, tDay: 0, r: [r[0], r[1], r[2]], v: [v[0], v[1], v[2]],
-      energy: e0, energyDrift: 0, radius: norm(r), speed: norm(v)
-    }];
-    var maxDrift = 0, idx;
-    for (idx = 1; idx <= count; idx++) {
-      s = advance(s, stepSize);
-      var rs = [s[0], s[1], s[2]], vs = [s[3], s[4], s[5]];
-      var energy = dot(vs, vs) / 2 - mu / norm(rs);
-      var drift = Math.abs((energy - e0) / e0);
-      maxDrift = Math.max(maxDrift, drift);
-      points.push({
-        tSec: idx * stepSize, tDay: idx * stepSize / CONSTANTS.DAY,
-        r: rs.slice(), v: vs.slice(), energy: energy,
-        energyDrift: (energy - e0) / e0, radius: norm(rs), speed: norm(vs)
+      var high = s.map(function (value, j) {
+        var delta = 0;
+        for (var k = 0; k < 6; k++) delta += rows[6][k] * ks[k][j];
+        return value + h * delta;
       });
+      var error = 0;
+      for (var j = 0; j < 6; j++) {
+        var low = s[j];
+        for (var k = 0; k < 7; k++) low += h * lowWeights[k] * ks[k][j];
+        var tolerance = (j < 3 ? posTol : velTol) + relTol * Math.max(Math.abs(s[j]), Math.abs(high[j]));
+        error = Math.max(error, Math.abs(high[j] - low) / tolerance);
+      }
+      if (!isFinite(error)) throw new RangeError('Adaptive error estimate is non finite.');
+      if (error <= 1) {
+        t = Math.abs(total - t) <= Math.abs(h) ? total : t + h;
+        s = high;
+        points.push(point(s, t, physics, setup.initial, setup.energyScale));
+      } else rejected++;
+      var factor = error === 0 ? 5 : clamp(0.9 * Math.pow(error, -0.2), 0.1, 5);
+      h = direction * Math.min(maxH, Math.abs(h) * factor);
     }
-    var finalEnergy = points[points.length - 1].energy;
-    var el = stateToElements(points[0].r, points[0].v, mu);
-    var inc = el.i, a = isFinite(el.a) ? el.a : 1 / (2 / norm(r) - dot(v, v) / mu);
-    var driftRates = j2DriftRates(a, Math.min(el.eccentricity, 0.99), inc, mu, j2, radiusBody);
-    return {
-      points: points, trajectory: points,
-      initialEnergy: e0, finalEnergy: finalEnergy,
-      energyDrift: (finalEnergy - e0) / e0,
-      maxEnergyDrift: maxDrift,
-      stepSizeSec: stepSize, steps: count, dtSec: total,
-      mu: mu, j2: j2, bodyRadius: radiusBody, j2Enabled: useJ2,
-      raanDriftDegPerDay: useJ2 ? driftRates.raanDriftDegPerDay : 0,
-      argPeDriftDegPerDay: useJ2 ? driftRates.argPeDriftDegPerDay : 0,
-      meanMotionDriftDegPerDay: useJ2 ? driftRates.meanMotionDriftDegPerDay : 0,
-      inclinationRad: inc, semiMajorAxis: a
-    };
+    var result = propagationSummary(points, physics, total, 'RK45', rejected);
+    result.relativeTolerance = relTol;
+    result.positionTolerance = posTol; result.velocityTolerance = velTol;
+    return result;
   }
 
   /* Tsiolkovsky multi stage rocket equation. */
   function computeStaging(stages, payloadKg) {
     if (!Array.isArray(stages) || stages.length === 0) throw new RangeError('At least one stage is required.');
-    var payload = num(payloadKg, 0);
+    var payload = finiteInput(payloadKg, 'Payload mass');
     if (!(payload > 0)) throw new RangeError('Payload mass must be positive.');
     var dry = [], prop = [], isp = [];
     for (var i = 0; i < stages.length; i++) {
-      dry.push(Math.max(0, num(stages[i].dryMassKg, 0)));
-      prop.push(Math.max(0, num(stages[i].propellantMassKg, 0)));
-      isp.push(Math.max(1, num(stages[i].ispSec, 300)));
+      var stage = stages[i];
+      if (!stage) throw new RangeError('Stage must contain masses and specific impulse.');
+      var d = finiteInput(stage.dryMassKg, 'Dry mass'), p = finiteInput(stage.propellantMassKg, 'Propellant mass');
+      if (d < 0 || p < 0) throw new RangeError('Stage masses must be non negative.');
+      dry.push(d); prop.push(p); isp.push(positive(stage.ispSec, 'Specific impulse'));
     }
     var wet = [];
     var remaining = payload;
@@ -892,6 +1010,7 @@
   function pad(value, width) { return String(value).padStart(width, '0'); }
   function formatEpoch(date) {
     var d = (date instanceof Date) ? date : new Date(date);
+    if (!isFinite(d.getTime())) throw new RangeError('Epoch must be a valid UTC date.');
     return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1, 2) + '-' +
       pad(d.getUTCDate(), 2) + 'T' + pad(d.getUTCHours(), 2) + ':' +
       pad(d.getUTCMinutes(), 2) + ':' + pad(d.getUTCSeconds(), 2) + '.' +
@@ -900,6 +1019,7 @@
   function formatGmatEpoch(date) {
     var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     var d = (date instanceof Date) ? date : new Date(date);
+    if (!isFinite(d.getTime())) throw new RangeError('Epoch must be a valid UTC date.');
     return pad(d.getUTCDate(), 2) + ' ' + months[d.getUTCMonth()] + ' ' + d.getUTCFullYear() +
       ' ' + pad(d.getUTCHours(), 2) + ':' + pad(d.getUTCMinutes(), 2) + ':' +
       pad(d.getUTCSeconds(), 2) + '.' + pad(d.getUTCMilliseconds(), 3);
@@ -916,18 +1036,29 @@
     mission = mission || {};
     var name = mission.name || 'OrbitLab Mission';
     var epoch = mission.epoch || '2026-11-08T00:00:00.000Z';
-    var mu = num(mission.mu, CONSTANTS.MU_EARTH);
+    var mu = gravityParameter(mission.mu);
     var el = mission.elements || { a: CONSTANTS.LEO_RADIUS, e: 0, i: 0, raan: 0, argPe: 0, nu: 0 };
     var center = mission.center || (mu === CONSTANTS.MU_SUN ? 'Sun' : 'Earth');
     var frame = mission.frame || (mu === CONSTANTS.MU_SUN ? 'SunMJ2000Ec' : 'EarthMJ2000Eq');
-    var sc = mission.spacecraftName || 'OrbitLabSat';
+    function identifier(value) {
+      if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(value)) throw new RangeError('GMAT identifiers must be simple names.');
+      return value;
+    }
+    identifier(frame);
+    var sc = identifier(mission.spacecraftName || 'OrbitLabSat');
+    el = elementsToState(el, mu).elements;
+    if (!['Earth', 'Sun', 'Moon'].includes(center)) throw new RangeError('Unsupported export center.');
     var burnList = Array.isArray(mission.burns) ? mission.burns : [];
     var lines = [
       '%----------------------------------------',
       '% OrbitLab generated GMAT mission script',
-      '% Mission: ' + name,
+      '% Mission: ' + String(name).replace(/[\r\n]/g, ' '),
       '% Epoch: ' + formatEpoch(epoch),
       '%----------------------------------------',
+      '',
+      'Create CoordinateSystem ' + frame + ';',
+      'GMAT ' + frame + '.Origin = ' + center + ';',
+      'GMAT ' + frame + '.Axes = ' + (mu === CONSTANTS.MU_SUN ? 'MJ2000Ec' : 'MJ2000Eq') + ';',
       '',
       'Create Spacecraft ' + sc + ';',
       'GMAT ' + sc + '.DateFormat = UTCGregorian;',
@@ -944,34 +1075,45 @@
       ''
     ];
     burnList.forEach(function (burn, i) {
-      var id = burn.id || ('Burn' + (i + 1));
+      var id = identifier(burn.id || ('Burn' + (i + 1)));
       lines.push('Create ImpulsiveBurn ' + id + ';');
-      lines.push('GMAT ' + id + '.CoordinateSystem = LocalVNB;');
+      lines.push('GMAT ' + id + '.CoordinateSystem = Local;');
+      lines.push('GMAT ' + id + '.Origin = ' + center + ';');
+      lines.push('GMAT ' + id + '.Axes = VNB;');
+      lines.push('GMAT ' + id + '.DecrementMass = false;');
       lines.push('GMAT ' + id + '.Element1 = ' + Number(num(burn.dv1, burn.dv || 0) / 1000).toFixed(9) + ';');
       lines.push('GMAT ' + id + '.Element2 = ' + Number(num(burn.dv2, 0) / 1000).toFixed(9) + ';');
       lines.push('GMAT ' + id + '.Element3 = ' + Number(num(burn.dv3, 0) / 1000).toFixed(9) + ';');
       lines.push('');
     });
+    lines.push('Create ForceModel OrbitLabForce;');
+    lines.push('GMAT OrbitLabForce.CentralBody = ' + center + ';');
+    var earthJ2 = mission.j2 && center === 'Earth';
+    lines.push('GMAT OrbitLabForce.PrimaryBodies = {' + (earthJ2 ? 'Earth' : '') + '};');
+    lines.push('GMAT OrbitLabForce.PointMasses = {' + (earthJ2 ? '' : center) + '};');
+    lines.push('GMAT OrbitLabForce.Drag = None;');
+    lines.push('GMAT OrbitLabForce.SRP = Off;');
+    if (earthJ2) {
+      lines.push('GMAT OrbitLabForce.GravityField.Earth.Degree = 2;');
+      lines.push('GMAT OrbitLabForce.GravityField.Earth.Order = 0;');
+    }
     lines.push('Create Propagator OrbitLabProp;');
+    lines.push('GMAT OrbitLabProp.FM = OrbitLabForce;');
     lines.push('GMAT OrbitLabProp.Type = RungeKutta89;');
     lines.push('GMAT OrbitLabProp.InitialStepSize = 60;');
     lines.push('GMAT OrbitLabProp.Accuracy = 1e-12;');
-    lines.push('GMAT OrbitLabProp.CentralBody = ' + center + ';');
-    lines.push('GMAT OrbitLabProp.PointMasses = {' + center + '};');
-    if (mission.j2) {
-      lines.push('GMAT OrbitLabProp.GravityField.Earth.Degree = 2;');
-      lines.push('GMAT OrbitLabProp.GravityField.Earth.Order = 0;');
-    }
     lines.push('');
     lines.push('Create OrbitView OrbitLabView;');
     lines.push('GMAT OrbitLabView.SolverIterations = Internal;');
     lines.push('GMAT OrbitLabView.Add = {' + sc + ', ' + center + '};');
     lines.push('');
-    lines.push('MissionSequence;');
+    lines.push('BeginMissionSequence;');
     burnList.forEach(function (burn, i) {
-      var id = burn.id || ('Burn' + (i + 1));
+      var id = identifier(burn.id || ('Burn' + (i + 1)));
       lines.push('Maneuver ' + id + '(' + sc + ');');
-      var propTime = num(burn.propagateSec, mission.propagateSec || 3600);
+      var propTime = optional(burn.propagateSec, 0, 'Burn propagation duration');
+      if (propTime < 0) throw new RangeError('Burn propagation duration must be non negative.');
+      if (propTime === 0) return;
       lines.push('Propagate OrbitLabProp(' + sc + ') { ' + sc + '.ElapsedSecs = ' + propTime.toFixed(1) + ' };');
     });
     if (!burnList.length) {
@@ -992,6 +1134,17 @@
     var objectId = meta.objectId || '2026-001A';
     var center = meta.centerName || (num(meta.mu, CONSTANTS.MU_EARTH) === CONSTANTS.MU_SUN ? 'SUN' : 'EARTH');
     var frame = meta.refFrame || (center === 'SUN' ? 'EME2000' : 'ICRF');
+    [objectName, objectId, center, frame, meta.originator || 'ORBITLAB'].forEach(function (v) {
+      if (/[\r\n]/.test(v)) throw new RangeError('OEM metadata must fit on one line.');
+    });
+    var previous = -Infinity;
+    trajectory.forEach(function (p, i) {
+      vec(p.r); vec(p.v);
+      var t = optional(p.tSec, i, 'Ephemeris time');
+      if (t <= previous) throw new RangeError('Ephemeris times must increase strictly.');
+      previous = t;
+    });
+    formatEpoch(epoch0);
     var lines = [
       'CCSDS_OEM_VERS = 2.0',
       'CREATION_DATE = ' + formatEpoch(new Date()).replace(/\.\d{3}$/, ''),
@@ -1003,10 +1156,10 @@
       'CENTER_NAME          = ' + center,
       'REF_FRAME            = ' + frame,
       'TIME_SYSTEM          = UTC',
-      'START_TIME           = ' + formatEpoch(base).replace(/\.\d{3}$/, ''),
-      'STOP_TIME            = ' + formatEpoch(base + num(trajectory[trajectory.length - 1].tSec, 0) * 1000).replace(/\.\d{3}$/, ''),
+      'START_TIME           = ' + formatEpoch(base + (trajectory[0].tSec !== undefined ? trajectory[0].tSec : 0) * 1000),
+      'STOP_TIME            = ' + formatEpoch(base + (trajectory[trajectory.length - 1].tSec !== undefined ? trajectory[trajectory.length - 1].tSec : trajectory.length - 1) * 1000),
       'INTERPOLATION        = HERMITE',
-      'INTERPOLATION_DEGREE = 5',
+      'INTERPOLATION_DEGREE = ' + Math.min(5, 2 * trajectory.length - 1),
       'META_STOP',
       ''
     ];
@@ -1016,22 +1169,19 @@
       lines.push(stateLine(p, epoch));
     });
     lines.push('');
-    lines.push('META_START');
-    lines.push('OBJECT_NAME          = ' + objectName);
-    lines.push('META_STOP');
-    lines.push('');
     return lines.join('\n');
   }
 
-  function exportTrajectoryCsv(trajectory) {
+  function exportTrajectoryCsv(trajectory, meta) {
+    meta = meta || {};
     var header = 'epoch_utc,t_sec,t_day,x_m,y_m,z_m,vx_m_s,vy_m_s,vz_m_s,r_m,v_m_s,specific_energy_j_kg';
-    var mu = CONSTANTS.MU_EARTH;
+    var mu = gravityParameter(meta.mu);
     var rows = [header];
     (trajectory || []).forEach(function (p, i) {
       var t = num(p.tSec, i);
       var r = vec(p.r), v = vec(p.v);
-      var epoch = p.epoch || formatEpoch(Date.UTC(2026, 10, 8) + t * 1000);
-      var energy = p.energy !== undefined ? p.energy : dot(v, v) / 2 - mu / norm(r);
+      var epoch = p.epoch ? formatEpoch(p.epoch) : formatEpoch(new Date(meta.epoch || '2026-11-08T00:00:00.000Z').getTime() + t * 1000);
+      var energy = p.energy !== undefined ? finiteInput(p.energy, 'Trajectory energy') : dot(v, v) / 2 - mu / norm(r);
       rows.push([
         epoch, t.toFixed(6), (t / CONSTANTS.DAY).toFixed(9),
         r[0].toFixed(6), r[1].toFixed(6), r[2].toFixed(6),
@@ -1044,25 +1194,30 @@
 
   /* Sample one elliptic orbit at evenly spaced mean anomalies. */
   function sampleOrbit(elements, mu, samples) {
-    mu = num(mu, CONSTANTS.MU_EARTH);
+    mu = gravityParameter(mu);
     var count = clamp(Math.round(num(samples, 180)), 8, 2000);
     var state = elementsToState(elements, mu);
     var a = elements.a, e = elements.e;
+    if (!(a > 0 && e < 1)) throw new RangeError('Sampling a full period requires an elliptic orbit.');
     var n = Math.sqrt(mu / (a * a * a));
+    var nu0 = elements.nu || 0;
+    var E0 = 2 * Math.atan2(Math.sqrt(1 - e) * Math.sin(nu0 / 2), Math.sqrt(1 + e) * Math.cos(nu0 / 2));
+    var M0 = E0 - e * Math.sin(E0);
     var m = pqwToIjkMatrix(elements.raan || 0, elements.i || 0, elements.argPe || 0);
     var points = [];
     for (var i = 0; i < count; i++) {
-      var M = TAU * i / (count - 1);
+      var elapsedM = TAU * i / (count - 1);
+      var M = M0 + elapsedM;
       var sol = solveKepler(M, e);
       var E = sol.anomaly;
       var nu = sol.trueAnomaly;
       var radius = a * (1 - e * Math.cos(E));
       var k = Math.sqrt(mu / (a * (1 - e * e)));
       var rP = matVec(m, [radius * Math.cos(nu), radius * Math.sin(nu), 0]);
-      var vP = matVec(m, [-k * Math.sin(E) * Math.sqrt(1 - e * e) / (1 - e * Math.cos(E)),
-        k * Math.sqrt(1 - e * e) * Math.cos(E) / (1 - e * Math.cos(E)), 0]);
+      var vP = matVec(m, [-Math.sqrt(mu / a) * Math.sin(E) / (1 - e * Math.cos(E)),
+        Math.sqrt(mu / a) * Math.sqrt(1 - e * e) * Math.cos(E) / (1 - e * Math.cos(E)), 0]);
       points.push({
-        tSec: M / n, tDay: M / n / CONSTANTS.DAY,
+        tSec: elapsedM / n, tDay: elapsedM / n / CONSTANTS.DAY,
         M: M, E: E, nu: nu,
         r: rP, v: vP, radius: radius, speed: norm(vP)
       });
@@ -1134,7 +1289,7 @@
       description: 'A three burn bi-elliptic raise that beats Hohmann beyond the critical radius ratio.',
       biElliptic: biEllipticTransfer(CONSTANTS.LEO_RADIUS, 15 * CONSTANTS.LEO_RADIUS,
         50 * CONSTANTS.LEO_RADIUS, CONSTANTS.MU_EARTH),
-      porkchopPreset: 'earth-mars'
+      porkchopPreset: 'leo-lunar'
     }
   ]);
 
@@ -1159,6 +1314,7 @@
     solveLambert: solveLambert,
     computePorkchopGrid: computePorkchopGrid,
     propagateRK4: propagateRK4,
+    propagateRK45: propagateRK45,
     j2DriftRates: j2DriftRates,
     solveSunSyncInclination: solveSunSyncInclination,
     computeStaging: computeStaging,

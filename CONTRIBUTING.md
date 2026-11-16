@@ -44,7 +44,7 @@ python3 -m http.server 8000
 | `index.html`, `style.css` | The console shell and its styling |
 | `test.js` | The test suite |
 
-The same `orbit.js` kernel drives the interactive console and the 125-test
+The same `orbit.js` kernel drives the interactive console and the 172-test
 suite, so a change in the kernel is visible in both. `orbit.js` is a UMD module,
 so `require('./orbit.js')` works in Node and `window.OrbitLab` is available in
 the browser. Match that pattern in new modules.

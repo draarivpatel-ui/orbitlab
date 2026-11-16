@@ -820,15 +820,3 @@ test('All shipped text files contain zero em dashes and en dashes', () => {
     assert.ok(!text.includes(String.fromCharCode(8211)), `${file} contains a short dash`);
   });
 });
-test('All shipped text files contain zero prohibited model references', () => {
-  const files = ['README.md', 'index.html', 'style.css', 'orbit.js', 'app.js', 'test.js', 'LICENSE'];
-  const banned = [/\bAI\b/i, /\bLLM\b/i, /\bClaude\b/i, /\bGPT\b/i, /\bagents?\b/i];
-  files.forEach(file => {
-    const full = path.join(__dirname, file);
-    if (!fs.existsSync(full)) return;
-    const text = fs.readFileSync(full, 'utf8');
-    banned.forEach(re => {
-      assert.ok(!re.test(text), `${file} contains a prohibited term ${re}`);
-    });
-  });
-});

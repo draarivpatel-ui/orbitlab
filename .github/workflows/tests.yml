@@ -17,4 +17,4 @@ jobs:
         with:
           node-version: '20'
       - name: Run unit tests
-        run: node --test test.js
+        run: node --test --test-reporter=spec

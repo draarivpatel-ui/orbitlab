@@ -9,7 +9,7 @@
   var state = {
     presetId: O.PRESETS[0].id,
     view: 'plane',
-    windowPreset: 'earth-mars',
+    windowPreset: 'leo-geo',
     j2: false,
     scrub: 0,
     playing: false,
@@ -92,6 +92,13 @@
   function hexToRgb(hex) {
     var h = hex.replace('#', '');
     return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+  }
+
+  function chartPoint(svg, event, width, height) {
+    var rect = svg.getBoundingClientRect(), scale = Math.min(rect.width / width, rect.height / height);
+    if (!(scale > 0)) return [0, 0];
+    var offsetX = (rect.width - width * scale) / 2, offsetY = (rect.height - height * scale) / 2;
+    return [(event.clientX - rect.left - offsetX) / scale, (event.clientY - rect.top - offsetY) / scale];
   }
 
   function showTooltip(id, x, y, title, rows) {
@@ -235,10 +242,10 @@
     }
     data.burnTotal = data.burns.reduce(function (sum, b) { return sum + b.dv; }, 0);
     data.staging = O.computeStaging(STAGE_SPEC, 4200);
-    data.propagation = O.propagateRK4(orbitState.r, orbitState.v,
-      data.orbit.periodSec, 240, {
+    data.propagation = O.propagateRK45(orbitState.r, orbitState.v,
+      data.orbit.periodSec, {
         mu: preset.mu,
-        j2: state.j2 ? C.J2_EARTH : 0,
+        j2: state.j2 && data.preset.mu === C.MU_EARTH ? C.J2_EARTH : 0,
         bodyRadius: C.R_EARTH
       });
     data.trajectory = data.propagation.points;
@@ -281,6 +288,59 @@
       winSub.textContent = 'Min dv ' + num(data.porkchop.minimumTotalDv / 1000, 3) +
         ' km/s at day ' + num(data.porkchop.optimal.departureDay, 1);
     }
+  }
+
+  function updateVerification() {
+    var points = data.orbit.points, maxResidual = 0, maxStateError = 0, maxEnergyError = 0;
+    var expectedEnergy = -data.preset.mu / (2 * data.preset.elements.a);
+    points.forEach(function (p) {
+      maxResidual = Math.max(maxResidual, O.solveKepler(p.M, data.preset.elements.e).residual);
+      var back = O.stateToElements(p.r, p.v, data.preset.mu), rebuilt = O.elementsToState(back, data.preset.mu);
+      maxStateError = Math.max(maxStateError, V.norm(V.sub(p.r, rebuilt.r)) / p.radius);
+      var energy = V.dot(p.v, p.v) / 2 - data.preset.mu / p.radius;
+      maxEnergyError = Math.max(maxEnergyError, Math.abs((energy - expectedEnergy) / expectedEnergy));
+    });
+    var values = [
+      ['Kepler residual', sci(maxResidual, 2) + ' rad'],
+      ['State round trip', sci(maxStateError, 2) + ' relative'],
+      ['Vis-viva check', sci(maxEnergyError, 2) + ' relative'],
+      ['RK45 energy drift', sci(data.propagation.maxEnergyDrift, 2) + ' relative']
+    ];
+    var box = $('verification-grid'); clear(box);
+    values.forEach(function (pair) {
+      var item = html('div', 'verification-item');
+      item.appendChild(html('span', null, pair[0])); item.appendChild(html('strong', null, pair[1])); box.appendChild(item);
+    });
+    $('verification-status').textContent = maxStateError < 1e-8 && maxEnergyError < 1e-8 && data.propagation.maxEnergyDrift < 1e-7
+      ? 'Numerical checks passed' : 'Inspect numerical precision';
+    $('lambert-check').textContent = 'Select a grid cell, then verify its arrival independently.';
+    state.verifiedKey = '';
+    $('j2-toggle').disabled = data.preset.mu !== C.MU_EARTH;
+    $('j2-toggle').setAttribute('aria-checked', data.propagation.j2Enabled ? 'true' : 'false');
+    $('j2-toggle').querySelector('.switch-text').textContent = data.preset.mu !== C.MU_EARTH ? 'Solar point mass' : data.propagation.j2Enabled ? 'On (full J2 potential)' : 'Off (two-body)';
+    doc.querySelectorAll('[data-mission]').forEach(function (button) { button.setAttribute('aria-pressed', button.dataset.mission === state.presetId ? 'true' : 'false'); });
+  }
+  function selectMission(id) {
+    var preset = O.PRESETS.find(function (p) { return p.id === id; });
+    if (!preset) return;
+    stopAnimation(); state.presetId = id; state.windowPreset = preset.porkchopPreset;
+    state.j2 = id === 'sun-sync-eo1'; state.scrub = 0; state.verifiedKey = '';
+    $('preset-select').value = id; $('window-select').value = state.windowPreset;
+    $('scrub-range').value = '0'; $('scrub-output').textContent = '0%';
+    buildMission(); renderAll();
+  }
+  function verifySelectedTransfer() {
+    var cell = cellAt(data.porkchop, state.cell.departureIndex, state.cell.flightIndex), box = $('lambert-check');
+    if (!cell || !cell.converged || !cell.departureVelocity) { box.textContent = 'Choose a converged numerical Lambert cell to verify.'; state.verifiedKey = ''; return; }
+    try {
+      var prop = O.propagateRK45(cell.r1, cell.departureVelocity, cell.timeOfFlightSec, {
+        mu: data.porkchop.mu, relativeTolerance: 1e-11, positionTolerance: 0.0001, velocityTolerance: 1e-8
+      });
+      var last = prop.points[prop.points.length - 1], miss = V.norm(V.sub(last.r, cell.r2));
+      var relativeMiss = miss / V.norm(cell.r2);
+      state.verifiedKey = state.presetId + ':' + state.windowPreset + ':' + state.cell.departureIndex + ':' + state.cell.flightIndex;
+      box.textContent = (relativeMiss < 1e-7 ? 'Arrival verified' : 'Inspect arrival residual') + ': miss ' + num(miss, 3) + ' m; relative ' + sci(relativeMiss, 2) + '; ' + prop.steps + ' independent RK45 steps.';
+    } catch (error) { state.verifiedKey = ''; box.textContent = 'Verification: ' + error.message; }
   }
 
   function updateReference() {
@@ -364,16 +424,16 @@
     svg.appendChild(g);
   }
 
-  function sampleHalfEllipsePqw(rp, ra, flip, m, scale, cx, cy, view) {
+  function sampleHalfEllipsePqw(rp, ra, secondHalf, m, scale, cx, cy, view) {
     var a = (rp + ra) / 2;
     var e = (ra - rp) / (ra + rp);
     var p = a * (1 - e * e);
     var d = [];
     for (var k = 0; k <= 72; k++) {
-      var nu = Math.PI * k / 72;
+      var nu = (secondHalf ? Math.PI : 0) + Math.PI * k / 72;
       var r = p / (1 + e * Math.cos(nu));
-      var xPqw = (flip ? -1 : 1) * r * Math.cos(nu);
-      var yPqw = (flip ? -1 : 1) * r * Math.sin(nu);
+      var xPqw = r * Math.cos(nu);
+      var yPqw = r * Math.sin(nu);
       var rIjk = V.matVec(m, [xPqw, yPqw, 0]);
       var q = project(rIjk, view, scale, cx, cy);
       d.push((k ? 'L' : 'M') + q[0].toFixed(2) + ' ' + q[1].toFixed(2));
@@ -410,31 +470,17 @@
     var scale = Math.min(box.w * 0.44, box.h * 0.44) / plotMaxR;
     var cx = box.x + box.w / 2, cy = box.y + box.h / 2;
 
+    var xExtent = box.w / (2 * scale), yExtent = box.h / (2 * scale);
+    function positionTicks(extent) {
+      return [0, .125, .25, .375, .5, .625, .75, .875, 1].map(function (u, index) {
+        var value = (2 * u - 1) * extent;
+        return { u: u, label: index % 2 ? null : value === 0 ? '0' : (value < 0 ? '-' : '+') + compact(Math.abs(value), 1) };
+      });
+    }
     drawAxes(svg, width, height, box,
       state.view === 'plane' ? 'Perifocal P axis (position)' : 'Inertial I / J projection',
       state.view === 'plane' ? 'Perifocal Q axis (position)' : 'Inertial K projection',
-      [
-        { u: 0, label: '-' + compact(plotMaxR, 1) },
-        { u: 0.125, label: null },
-        { u: 0.25, label: '-' + compact(plotMaxR * 0.5, 1) },
-        { u: 0.375, label: null },
-        { u: 0.5, label: '0' },
-        { u: 0.625, label: null },
-        { u: 0.75, label: '+' + compact(plotMaxR * 0.5, 1) },
-        { u: 0.875, label: null },
-        { u: 1, label: '+' + compact(plotMaxR, 1) }
-      ],
-      [
-        { u: 0, label: '-' + compact(plotMaxR, 1) },
-        { u: 0.125, label: null },
-        { u: 0.25, label: '-' + compact(plotMaxR * 0.5, 1) },
-        { u: 0.375, label: null },
-        { u: 0.5, label: '0' },
-        { u: 0.625, label: null },
-        { u: 0.75, label: '+' + compact(plotMaxR * 0.5, 1) },
-        { u: 0.875, label: null },
-        { u: 1, label: '+' + compact(plotMaxR, 1) }
-      ]);
+      positionTicks(xExtent), positionTicks(yExtent));
 
     /* Origin crosshair & reference frame triad. */
     svg.appendChild(el('line', {
@@ -867,6 +913,7 @@
     if (!box) return;
     clear(box);
     if (!cell) return;
+    if (!cell.converged) { box.textContent = 'No converged zero-revolution solution at this cell. Choose another departure or flight time.'; return; }
     var fields = [
       ['Departure epoch', 'Day ' + num(cell.departureDay, 2)],
       ['Time of flight', num(cell.timeOfFlightDay, 2) + ' d'],
@@ -907,7 +954,7 @@
         var v10 = valueFn(cellAt(g, di + 1, fi));
         var v11 = valueFn(cellAt(g, di + 1, fi + 1));
         var v01 = valueFn(cellAt(g, di, fi + 1));
-        if (!isFinite(v00) || !isFinite(v10) || !isFinite(v11) || !isFinite(v01)) continue;
+        if (![v00, v10, v11, v01].every(Number.isFinite)) continue;
 
         var p00 = [gx(di), gy(fi)];
         var p10 = [gx(di + 1), gy(fi)];
@@ -977,7 +1024,7 @@
         y: (box.y + (g.rows - 1 - cell.flightIndex) * ch).toFixed(2),
         width: (cw + 0.4).toFixed(2),
         height: (ch + 0.4).toFixed(2),
-        fill: rampColor(tone)
+        fill: cell.converged ? rampColor(tone) : 'var(--surface-3)'
       }));
     });
     svg.appendChild(heat);
@@ -1092,6 +1139,7 @@
     }
 
     function setCrosshair(di, fi) {
+      var prevDi = state.cell.departureIndex, prevFi = state.cell.flightIndex;
       state.cell.departureIndex = clamp(di, 0, g.cols - 1);
       state.cell.flightIndex = clamp(fi, 0, g.rows - 1);
       vline.setAttribute('x1', box.x + (state.cell.departureIndex + 0.5) * cw);
@@ -1099,6 +1147,10 @@
       hline.setAttribute('y1', box.y + (g.rows - 1 - state.cell.flightIndex + 0.5) * ch);
       hline.setAttribute('y2', hline.getAttribute('y1'));
       inspectorText(cellAt(g, state.cell.departureIndex, state.cell.flightIndex));
+      if (state.verifiedKey && (state.cell.departureIndex !== prevDi || state.cell.flightIndex !== prevFi)) {
+        state.verifiedKey = '';
+        $('lambert-check').textContent = 'Select a grid cell, then verify its arrival independently.';
+      }
     }
 
     var hit = el('rect', {
@@ -1109,8 +1161,7 @@
     svg.appendChild(hit);
     hit.addEventListener('mousemove', function (ev) {
       var r = svg.getBoundingClientRect();
-      var mx = (ev.clientX - r.left) / r.width * width;
-      var my = (ev.clientY - r.top) / r.height * height;
+      var pointer = chartPoint(svg, ev, width, height), mx = pointer[0], my = pointer[1];
       var di = clamp(Math.floor((mx - box.x) / cw), 0, g.cols - 1);
       var fi = clamp(g.rows - 1 - Math.floor((my - box.y) / ch), 0, g.rows - 1);
       setCrosshair(di, fi);
@@ -1134,9 +1185,9 @@
 
     setCrosshair(state.cell.departureIndex, state.cell.flightIndex);
     renderPorkchopLegend('porkchop-legend', lo / 1000, hi / 1000);
-    $('porkchop-sub').textContent = g.label + ' (' + g.cols + 'x' + g.rows + ' ' + g.method +
+    $('porkchop-sub').textContent = g.optimal ? g.label + ' (' + g.cols + 'x' + g.rows + ' ' + g.method +
       ' solver): min dv ' + num(g.minimumTotalDv / 1000, 3) + ' km/s at day ' +
-      num(g.optimal.departureDay, 2) + ', TOF ' + num(g.optimal.timeOfFlightDay, 2) + ' d';
+      num(g.optimal.departureDay, 2) + ', TOF ' + num(g.optimal.timeOfFlightDay, 2) + ' d' : 'No converged transfers in this window.';
 
     var rows = g.cells.map(function (c) {
       return [
@@ -1159,7 +1210,7 @@
     var svg = $('energy-svg');
     clear(svg);
     svg.appendChild(el('desc', { id: 'energy-desc' },
-      'Technical line plot of relative specific energy drift over one orbital period under 4th-order Runge-Kutta integration.'));
+      'Relative conserved energy drift during adaptive RK45 propagation, including the J2 potential when enabled.'));
     var width = 760, height = 290;
     var box = { x: 76, y: 20, w: 660, h: 214 };
     var pts = data.trajectory;
@@ -1200,7 +1251,7 @@
     svg.appendChild(el('text', {
       x: 13, y: box.y + box.h / 2, 'class': 'axis-title', 'text-anchor': 'middle',
       transform: 'rotate(-90 13 ' + (box.y + box.h / 2) + ')'
-    }, 'Relative drift (E - E0) / E0'));
+    }, 'Conserved energy drift (E - E0) / energy scale'));
 
     var d = [];
     pts.forEach(function (p, i) {
@@ -1239,8 +1290,14 @@
     svg.appendChild(hit);
     hit.addEventListener('mousemove', function (ev) {
       var r = svg.getBoundingClientRect();
-      var mx = (ev.clientX - r.left) / r.width * width;
-      var idx = clamp(Math.round((mx - box.x) / box.w * (pts.length - 1)), 0, pts.length - 1);
+      var mx = chartPoint(svg, ev, width, height)[0];
+      var targetSec = clamp((mx - box.x) / box.w, 0, 1) * (pts[pts.length - 1].tSec || 0);
+      var lo = 0, hi = pts.length - 1;
+      while (hi - lo > 1) {
+        var mid = (lo + hi) >> 1;
+        if (pts[mid].tSec < targetSec) lo = mid; else hi = mid;
+      }
+      var idx = Math.abs(pts[hi].tSec - targetSec) < Math.abs(pts[lo].tSec - targetSec) ? hi : lo;
       var p = pts[idx], q = map(p);
       cross.setAttribute('x1', q[0]); cross.setAttribute('x2', q[0]); cross.setAttribute('opacity', 1);
       dot.setAttribute('cx', q[0]); dot.setAttribute('cy', q[1]); dot.setAttribute('opacity', 1);
@@ -1259,11 +1316,12 @@
 
     var prop = data.propagation;
     var metrics = [
-      ['RK4 steps', num(prop.steps, 0)],
+      ['RK45 accepted steps', num(prop.steps, 0)],
+      ['Rejected steps', num(prop.rejectedSteps, 0)],
       ['dt', num(prop.stepSizeSec, 2) + ' s'],
       ['Max |dE/E0|', sci(prop.maxEnergyDrift, 3)],
       ['Final dE/E0', sci(prop.energyDrift, 3)],
-      ['J2 zonal harmonic', state.j2 ? 'Enabled (1.08263e-3)' : 'Disabled (0)'],
+      ['J2 zonal harmonic', data.propagation.j2Enabled ? 'Enabled (1.08263e-3)' : 'Disabled (0)'],
       ['Secular dRAAN/dt', num(prop.raanDriftDegPerDay, 4) + ' deg/day'],
       ['Secular dArgPe/dt', num(prop.argPeDriftDegPerDay, 4) + ' deg/day']
     ];
@@ -1275,7 +1333,7 @@
       wrap.appendChild(html('strong', null, m[1]));
       strip.appendChild(wrap);
     });
-    $('energy-sub').textContent = 'RK4 integration over ' + num(prop.dtSec / 3600, 2) +
+    $('energy-sub').textContent = 'Adaptive RK45 integration over ' + num(prop.dtSec / 3600, 2) +
       ' h (' + (state.j2 ? 'two-body + J2 oblateness potential' : 'point-mass Keplerian gravity') + ')';
     renderLegend('energy-legend', [
       { label: 'Relative energy drift (dE/E0)', color: seriesColor(0) },
@@ -1300,6 +1358,7 @@
 
   function renderAll() {
     updateHero();
+    updateVerification();
     updateReference();
     renderTrajectory();
     renderTransfer();
@@ -1351,13 +1410,16 @@
     $('view-select').value = state.view;
     $('window-select').value = state.windowPreset;
 
-    presetSelect.addEventListener('change', function () {
-      state.presetId = this.value;
-      state.scrub = 0;
-      $('scrub-range').value = '0';
-      $('scrub-output').textContent = '0%';
-      buildMission();
-      renderAll();
+    presetSelect.addEventListener('change', function () { selectMission(this.value); });
+    doc.querySelectorAll('[data-mission]').forEach(function (button) {
+      button.addEventListener('click', function () { selectMission(button.dataset.mission); });
+    });
+    $('verify-lambert').addEventListener('click', verifySelectedTransfer);
+    $('trajectory-svg').addEventListener('keydown', function (event) {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home' && event.key !== 'End') return;
+      event.preventDefault(); stopAnimation();
+      state.scrub = event.key === 'Home' ? 0 : event.key === 'End' ? 100 : clamp(state.scrub + (event.key === 'ArrowLeft' ? -1 : 1), 0, 100);
+      $('scrub-range').value = String(state.scrub); $('scrub-output').textContent = state.scrub + '%'; renderTrajectory();
     });
     $('view-select').addEventListener('change', function () {
       state.view = this.value;
@@ -1365,6 +1427,8 @@
     });
     $('window-select').addEventListener('change', function () {
       state.windowPreset = this.value;
+      state.verifiedKey = '';
+      $('lambert-check').textContent = 'Select a grid cell, then verify its arrival independently.';
       data.porkchop = O.computePorkchopGrid({
         preset: state.windowPreset, departureSteps: 30, flightSteps: 26
       });
@@ -1382,13 +1446,13 @@
       var text = this.querySelector('.switch-text');
       if (text) text.textContent = state.j2 ? 'On (J2 = 1.0826e-3)' : 'Off (two-body)';
       var os = data.orbit.state;
-      data.propagation = O.propagateRK4(os.r, os.v, data.orbit.periodSec, 240, {
+      data.propagation = O.propagateRK45(os.r, os.v, data.orbit.periodSec, {
         mu: data.preset.mu,
-        j2: state.j2 ? C.J2_EARTH : 0,
+        j2: state.j2 && data.preset.mu === C.MU_EARTH ? C.J2_EARTH : 0,
         bodyRadius: C.R_EARTH
       });
       data.trajectory = data.propagation.points;
-      renderEnergy();
+      renderEnergy(); updateVerification();
     });
     $('theme-toggle').addEventListener('click', function () {
       setTheme(doc.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
@@ -1412,6 +1476,7 @@
       }, reduce ? 120 : 40);
     });
 
+    doc.addEventListener('visibilitychange', function () { if (doc.hidden) stopAnimation(); });
     $('download-gmat').addEventListener('click', function () {
       var mission = {
         name: data.preset.name,
@@ -1419,14 +1484,8 @@
         elements: data.preset.elements,
         epoch: '2026-11-08T00:00:00.000Z',
         j2: state.j2,
-        propagateSec: data.hohmann.timeOfFlightSec,
-        burns: data.burns.map(function (b, i) {
-          return {
-            id: 'Burn' + (i + 1),
-            dv1: b.dv,
-            propagateSec: data.hohmann.timeOfFlightSec / data.burns.length
-          };
-        })
+        propagateSec: data.orbit.periodSec,
+        burns: []
       };
       downloadFile('orbitlab-mission.script', O.exportGmatScript(mission), 'text/plain');
     });
@@ -1436,11 +1495,12 @@
         objectName: data.preset.name.toUpperCase().replace(/[^A-Z0-9 ]/g, '').slice(0, 32),
         objectId: '2026-001A',
         mu: data.preset.mu,
-        originator: 'ORBITLAB'
+        originator: 'ORBITLAB',
+        refFrame: data.preset.mu === C.MU_SUN ? 'ECLIPJ2000' : 'ICRF'
       }), 'text/plain');
     });
     $('download-csv').addEventListener('click', function () {
-      downloadFile('orbitlab-trajectory.csv', O.exportTrajectoryCsv(data.trajectory), 'text/csv');
+      downloadFile('orbitlab-trajectory.csv', O.exportTrajectoryCsv(data.trajectory, { mu: data.preset.mu, epoch: '2026-11-08T00:00:00.000Z' }), 'text/csv');
     });
   }
 

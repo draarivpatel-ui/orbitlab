@@ -899,3 +899,33 @@ tr.optimal-row td {
     border: 1px solid CanvasText;
   }
 }
+
+/* Mission entry and numerical evidence. */
+:root { --radius: 8px; --text-muted: #a0acbc; }
+:root[data-theme="light"] { --text-muted: #586577; }
+.mission-intro { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 16px 0 8px; }
+.eyebrow { color: var(--series-3); letter-spacing: .16em; font: 11px var(--font-mono); margin: 0 0 9px; }
+.mission-intro h2 { font: 650 clamp(25px, 3.6vw, 42px)/1.1 var(--font-sans); letter-spacing: -.04em; }
+.mission-intro p:last-child { color: var(--text-secondary); margin: 10px 0 0; max-width: 650px; }
+.verification-badge { border: 1px solid var(--series-3); color: var(--series-3); background: var(--surface-1); border-radius: 20px; font: 11px var(--font-mono); padding: 9px 13px; white-space: nowrap; }
+.showcase-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.mission-card { color: var(--text-primary); border: 1px solid var(--border-strong); background: var(--surface-1); border-radius: var(--radius); text-align: left; padding: 14px 12px; cursor: pointer; min-width: 0; }
+.mission-card span { color: var(--text-muted); font: 10px var(--font-mono); letter-spacing: .05em; }
+.mission-card strong { display: block; font: 600 14px/1.35 var(--font-sans); margin: 8px 0 5px; }
+.mission-card small { color: var(--text-secondary); font: 11px/1.4 var(--font-sans); display: block; }
+.mission-card:hover, .mission-card[aria-pressed="true"] { border-color: var(--series-1); background: var(--surface-3); }
+.mission-card[aria-pressed="true"] span { color: var(--series-1); }
+.verification-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.verification-item { background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--radius); padding: 9px 12px; }
+.verification-item span { color: var(--text-muted); font: 11px var(--font-sans); display: block; margin-bottom: 5px; }
+.verification-item strong { color: var(--series-3); font: 12px var(--font-mono); }
+.arrival-check { display: flex; gap: 12px; align-items: center; margin-top: 10px; }
+.arrival-check output { font: 11px/1.5 var(--font-mono); color: var(--text-secondary); }
+.console-button, .control-input, .switch { min-height: 40px; }
+button:disabled { opacity: .5; cursor: default; }
+.panel-head h2 { font: 600 16px var(--font-sans); }
+.telemetry-val-primary { font-size: 26px; }
+.tooltip[hidden] { display: none; }
+@media (min-width: 1180px) { .panel-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .panel-grid > .panel:nth-child(-n+2) { grid-column: auto; } }
+@media (max-width: 1000px) { .showcase-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } .verification-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .mission-intro { align-items: flex-start; flex-direction: column; gap: 12px; } .showcase-grid { grid-template-columns: 1fr 1fr; } .mission-card:last-child { grid-column: 1 / -1; } .arrival-check { align-items: flex-start; flex-direction: column; } .telemetry-note { white-space: normal; } .brand-sub { max-width: 250px; } }
