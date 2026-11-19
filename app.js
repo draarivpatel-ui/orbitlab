@@ -23,7 +23,6 @@
   };
 
   var SERIES = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)'];
-  var SEQ_STEPS = ['#0f2942', '#173d63', '#1f5487', '#286bb8', '#4287d6', '#72aeeed9', '#b8dcff'];
   var SEQ_HEX = ['#0f2942', '#173d63', '#1f5487', '#286bb8', '#4287d6', '#75b0f0', '#b8dcff'];
 
   function $(id) { return doc.getElementById(id); }
@@ -730,7 +729,7 @@
     clear(svg);
     svg.appendChild(el('desc', { id: 'transfer-desc' },
       'Horizontal technical bars showing the delta-v magnitude and share of each maneuver burn.'));
-    var width = 440, height = 270;
+    var height = 270;
     var box = { x: 148, y: 24, w: 238, h: 184 };
     var max = Math.max.apply(null, data.burns.map(function (b) { return b.dv; })) * 1.18 || 1;
     var gap = data.burns.length > 1 ? 16 : 0;
@@ -807,7 +806,6 @@
     clear(svg);
     svg.appendChild(el('desc', { id: 'staging-desc' },
       'Stage-by-stage delta-v bars overlaid with the cumulative vehicle delta-v profile.'));
-    var width = 440, height = 270;
     var box = { x: 56, y: 24, w: 356, h: 184 };
     var stages = data.staging.stages;
     var max = data.staging.totalDv * 1.14;
