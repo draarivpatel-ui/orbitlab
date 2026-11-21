@@ -1320,7 +1320,6 @@
       var E = sol.anomaly;
       var nu = sol.trueAnomaly;
       var radius = a * (1 - e * Math.cos(E));
-      var k = Math.sqrt(mu / (a * (1 - e * e)));
       var rP = matVec(m, [radius * Math.cos(nu), radius * Math.sin(nu), 0]);
       var vP = matVec(m, [-Math.sqrt(mu / a) * Math.sin(E) / (1 - e * Math.cos(E)),
         Math.sqrt(mu / a) * Math.sqrt(1 - e * e) * Math.cos(E) / (1 - e * Math.cos(E)), 0]);
