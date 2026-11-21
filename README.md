@@ -52,7 +52,7 @@ Node.js 22 or newer is sufficient for the test runner:
 node --test --test-reporter=spec
 ```
 
-The suite has **176 passing tests**: 155 engine, regression and export checks, 18 DOM runtime checks, and three repository/content checks. DOM tests evaluate the actual HTML and scripts in a small browser contract fixture. They cover every bound control, all presets and windows, animation cleanup, keyboard inspection, letterboxed SVG coordinates, exports, J2 applicability and blocked browser storage.
+The suite has **178 passing tests**: 156 engine, regression and export checks, 19 DOM runtime checks, and three repository/content checks. DOM tests evaluate the actual HTML and scripts in a small browser contract fixture. They cover every bound control, all presets and windows, animation cleanup, keyboard inspection, letterboxed SVG coordinates, exports, J2 applicability and blocked browser storage.
 
 Syntax verification:
 

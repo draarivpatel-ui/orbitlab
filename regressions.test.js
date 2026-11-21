@@ -182,3 +182,20 @@ test('OEM metadata STOP_TIME and START_TIME preserve milliseconds to include fin
   assert.match(stopMatch[1], /\.\d{3}$/);
 });
 
+test('near-antipodal Lambert solutions close under forward propagation or fail honestly', () => {
+  const h = O.hohmannTransfer(C.AU, 1.524 * C.AU);
+  for (const dA of [1e-2, 1e-4, 1e-6]) {
+    const r1 = [C.AU, 0, 0], r2 = [1.524 * C.AU * Math.cos(Math.PI - dA), 1.524 * C.AU * Math.sin(Math.PI - dA), 0];
+    for (const tf of [h.timeOfFlightSec * 0.8, h.timeOfFlightSec, h.timeOfFlightSec * 1.4]) {
+      const lambert = O.solveLambert(r1, r2, tf, C.MU_SUN, true);
+      if (!lambert.converged) continue;
+      const p = O.propagateRK45(r1, lambert.v1, tf, { mu: C.MU_SUN, relativeTolerance: 1e-11 });
+      assert.ok(miss(p.points.at(-1).r, r2) / V.norm(r2) < 1e-5, `dA=${dA} tf=${tf} miss=${miss(p.points.at(-1).r, r2)}`);
+      assert.ok(lambert.endpointMiss / V.norm(r2) < 1e-5, `endpointMiss ${lambert.endpointMiss}`);
+    }
+  }
+  const r1 = [C.AU, 0, 0], r2 = [1.524 * C.AU * Math.cos(Math.PI - 0.01), 1.524 * C.AU * Math.sin(Math.PI - 0.01), 0];
+  const forced = O.solveLambert(r1, r2, h.timeOfFlightSec, C.MU_SUN, true);
+  assert.equal(forced.converged, true);
+  assert.ok(forced.endpointMiss / V.norm(r2) < 1e-6, `forced endpointMiss ${forced.endpointMiss}`);
+});

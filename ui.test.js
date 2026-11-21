@@ -119,3 +119,12 @@ test('bi-elliptic second leg joins the first leg at apoapsis (-rb, 0)', () => {
   assert.equal(leg1End, leg2Start);
 });
 
+test('porkchop click commits a cell selection that keyboard arrows then move', () => {
+  const h = app(), svg = h.node('porkchop-svg'); svg._rect = { width: 1000, height: 430, left: 10, top: 20 };
+  const inspector = h.node('porkchop-inspector'), before = inspector.textContent;
+  h.event(hit(svg), 'click', { clientX: 400, clientY: 150 });
+  const afterClick = inspector.textContent;
+  assert.notEqual(afterClick, before);
+  h.event(hit(svg), 'keydown', { key: 'ArrowRight' });
+  assert.notEqual(inspector.textContent, afterClick);
+});

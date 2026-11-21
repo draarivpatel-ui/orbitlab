@@ -385,14 +385,16 @@
   }
 
   function drawAxes(svg, width, height, box, xTitle, yTitle, ticksX, ticksY) {
-    var g = el('g');
+    var g = el('g'), seenX = {}, seenY = {};
     ticksX.forEach(function (t) {
       var x = box.x + box.w * t.u;
+      var dupe = t.label !== null && seenX[t.label];
+      if (t.label !== null) seenX[t.label] = true;
       g.appendChild(el('line', {
         x1: x, y1: box.y, x2: x, y2: box.y + box.h,
-        'class': t.label === null ? 'gridline-minor' : 'gridline'
+        'class': (t.label === null || dupe) ? 'gridline-minor' : 'gridline'
       }));
-      if (t.label !== null) {
+      if (t.label !== null && !dupe) {
         g.appendChild(el('text', {
           x: x, y: box.y + box.h + 15, 'class': 'axis-tick', 'text-anchor': 'middle'
         }, t.label));
@@ -400,11 +402,13 @@
     });
     ticksY.forEach(function (t) {
       var y = box.y + box.h * (1 - t.u);
+      var dupe = t.label !== null && seenY[t.label];
+      if (t.label !== null) seenY[t.label] = true;
       g.appendChild(el('line', {
         x1: box.x, y1: y, x2: box.x + box.w, y2: y,
-        'class': t.label === null ? 'gridline-minor' : 'gridline'
+        'class': (t.label === null || dupe) ? 'gridline-minor' : 'gridline'
       }));
-      if (t.label !== null) {
+      if (t.label !== null && !dupe) {
         g.appendChild(el('text', {
           x: box.x - 7, y: y + 3, 'class': 'axis-tick', 'text-anchor': 'end'
         }, t.label));
@@ -422,6 +426,54 @@
       transform: 'rotate(-90 13 ' + (box.y + box.h / 2) + ')'
     }, yTitle));
     svg.appendChild(g);
+  }
+
+  /* Place direct chart labels so none overlap: each label tries candidate
+   * positions on rings around its anchor, preferring the outward radial
+   * direction, and gets a leader tick when displaced from its anchor. */
+  function placeDirectLabels(svg, labels, bounds, avoid) {
+    var CHAR_W = 6.1, LINE_H = 11, placed = [];
+    labels.forEach(function (l) {
+      var w = l.text.length * CHAR_W, spot = null;
+      var radii = [l.r0 || 10, 22, 34, 48, 64];
+      var turns = [0, -0.55, 0.55, -1.1, 1.1, -1.7, 1.7, -2.4, 2.4, Math.PI];
+      outer:
+      for (var ri = 0; ri < radii.length; ri++) {
+        for (var ti = 0; ti < turns.length; ti++) {
+          var hx = l.ax + Math.cos(l.dir + turns[ti]) * radii[ri];
+          var hy = l.ay + Math.sin(l.dir + turns[ti]) * radii[ri];
+          for (var s = 0; s < 2; s++) {
+            var x = s === 0 ? hx + 6 : hx - 6 - w, y = hy + 4;
+            if (x < bounds.x + 4 || x + w > bounds.x + bounds.w - 4 ||
+                y - LINE_H < bounds.y + 1 || y > bounds.y + bounds.h - 2) continue;
+            if (avoid && Math.hypot(x + w / 2 - avoid[0], y - LINE_H / 2 - avoid[1]) < avoid[2]) continue;
+            var hit = placed.some(function (p) {
+              return x < p.x + p.w + 3 && x + w > p.x - 3 && y - LINE_H < p.y + 2 && y > p.y - LINE_H - 2;
+            });
+            if (!hit) { spot = { x: x, y: y, hx: hx, hy: hy }; break outer; }
+          }
+        }
+      }
+      if (!spot) {
+        var px = l.ax + Math.cos(l.dir) * (l.r0 || 10), py = l.ay + Math.sin(l.dir) * (l.r0 || 10);
+        spot = {
+          x: clamp(px + 6, bounds.x + 4, bounds.x + bounds.w - 4 - w),
+          y: clamp(py + 4, bounds.y + LINE_H + 1, bounds.y + bounds.h - 2),
+          hx: px, hy: py
+        };
+      }
+      placed.push({ x: spot.x, y: spot.y, w: w });
+      var dAnchor = Math.hypot(spot.hx - l.ax, spot.hy - l.ay);
+      if (dAnchor > 13) {
+        svg.appendChild(el('line', {
+          x1: l.ax, y1: l.ay, x2: spot.hx, y2: spot.hy,
+          'class': 'leader-line'
+        }));
+      }
+      svg.appendChild(el('text', {
+        x: spot.x, y: spot.y, 'class': l.cls || 'direct-label'
+      }, l.text));
+    });
   }
 
   function sampleHalfEllipsePqw(rp, ra, secondHalf, m, scale, cx, cy, view) {
@@ -469,6 +521,8 @@
 
     var scale = Math.min(box.w * 0.44, box.h * 0.44) / plotMaxR;
     var cx = box.x + box.w / 2, cy = box.y + box.h / 2;
+    var pendingLabels = [];
+    function radialDir(q) { return Math.atan2(q[1] - cy, q[0] - cx); }
 
     var xExtent = box.w / (2 * scale), yExtent = box.h / (2 * scale);
     function positionTicks(extent) {
@@ -514,9 +568,10 @@
       svg.appendChild(el('circle', {
         cx: qRb[0], cy: qRb[1], r: 4.5, fill: seriesColor(3), stroke: 'var(--surface-1)', 'stroke-width': 1.5
       }));
-      svg.appendChild(el('text', {
-        x: qRb[0] + 8, y: qRb[1] - 6, 'class': 'direct-label'
-      }, 'rb burn 2 (' + num(data.biElliptic.dv2, 0) + ' m/s)'));
+      pendingLabels.push({
+        text: 'rb burn 2 (' + num(data.biElliptic.dv2, 0) + ' m/s)',
+        ax: qRb[0], ay: qRb[1], dir: radialDir(qRb), cls: 'direct-label'
+      });
     } else if (hasTransferArc) {
       var r1h = data.preset.r1 || data.orbit.state.periapsisRadius;
       var r2h = data.preset.r2;
@@ -532,9 +587,10 @@
       svg.appendChild(el('circle', {
         cx: qArr[0], cy: qArr[1], r: 4.5, fill: seriesColor(1), stroke: 'var(--surface-1)', 'stroke-width': 1.5
       }));
-      svg.appendChild(el('text', {
-        x: qArr[0] + 8, y: qArr[1] + 4, 'class': 'direct-label'
-      }, 'r2 arrival (' + compact(r2h, 1) + ')'));
+      pendingLabels.push({
+        text: 'r2 arrival (' + compact(r2h, 1) + ')',
+        ax: qArr[0], ay: qArr[1], dir: radialDir(qArr), cls: 'direct-label'
+      });
     }
 
     /* Central gravitational body. */
@@ -553,9 +609,10 @@
     svg.appendChild(el('line', {
       x1: cx, y1: cy - 4, x2: cx, y2: cy + 4, stroke: 'var(--planet-rim)', 'stroke-width': 1
     }));
-    svg.appendChild(el('text', {
-      x: cx + bodyR + 6, y: cy + 12, 'class': 'axis-tick'
-    }, isSun ? 'Sun (focus)' : 'Earth (focus)'));
+    pendingLabels.push({
+      text: isSun ? 'Sun (focus)' : 'Earth (focus)',
+      ax: cx, ay: cy, dir: 0.35, r0: bodyR + 8, cls: 'axis-tick'
+    });
 
     var path = [];
     var coords = pts.map(function (p) {
@@ -584,18 +641,14 @@
     }));
 
     [
-      { label: 'rp (' + compact(data.orbit.state.periapsisRadius, 2) + ')', q: qPeri, color: seriesColor(2), dy: -8 },
-      { label: 'ra (' + compact(data.orbit.state.apoapsisRadius || data.orbit.state.periapsisRadius, 2) + ')', q: qApo, color: seriesColor(3), dy: 14 }
+      { label: 'rp (' + compact(data.orbit.state.periapsisRadius, 2) + ')', q: qPeri, color: seriesColor(2) },
+      { label: 'ra (' + compact(data.orbit.state.apoapsisRadius || data.orbit.state.periapsisRadius, 2) + ')', q: qApo, color: seriesColor(3) }
     ].forEach(function (a) {
       svg.appendChild(el('circle', {
         cx: a.q[0], cy: a.q[1], r: 4.5, fill: cssVar('--surface-1'),
         stroke: a.color, 'stroke-width': 2
       }));
-      svg.appendChild(el('text', {
-        x: clamp(a.q[0] + 8, box.x + 6, box.x + box.w - 115),
-        y: clamp(a.q[1] + a.dy, box.y + 12, box.y + box.h - 6),
-        'class': 'direct-label'
-      }, a.label));
+      pendingLabels.push({ text: a.label, ax: a.q[0], ay: a.q[1], dir: radialDir(a.q), cls: 'direct-label' });
     });
 
     /* Burn node markers. */
@@ -608,11 +661,10 @@
         x: q[0] - 4, y: q[1] - 4, width: 8, height: 8,
         fill: c, stroke: 'var(--surface-1)', 'stroke-width': 1.5
       }));
-      svg.appendChild(el('text', {
-        x: clamp(q[0] + 8, box.x + 6, box.x + box.w - 90),
-        y: clamp(q[1] + (i === 0 ? 13 : -8), box.y + 12, box.y + box.h - 6),
-        'class': 'direct-label'
-      }, 'dv' + (i + 1)));
+      pendingLabels.push({
+        text: 'dv' + (i + 1), ax: q[0], ay: q[1],
+        dir: radialDir(q) + (i === 0 ? 0.7 : -0.7), cls: 'direct-label'
+      });
     });
 
     /* Scrubbed spacecraft radius vector, velocity vector, and state marker. */
@@ -636,11 +688,11 @@
       fill: cssVar('--surface-1'), stroke: seriesColor(0), 'stroke-width': 2
     }));
     svg.appendChild(el('circle', { cx: q[0], cy: q[1], r: 2.5, fill: seriesColor(0) }));
-    svg.appendChild(el('text', {
-      x: clamp(q[0] + 10, box.x + 6, box.x + box.w - 115),
-      y: clamp(q[1] - 9, box.y + 12, box.y + box.h - 6),
-      'class': 'direct-label'
-    }, 'SC (nu=' + num(p.nu * O.DEG, 1) + ' deg)'));
+    pendingLabels.push({
+      text: 'SC (nu=' + num(p.nu * O.DEG, 1) + ' deg)',
+      ax: q[0], ay: q[1], dir: radialDir(q), cls: 'direct-label'
+    });
+    placeDirectLabels(svg, pendingLabels, box, [cx, cy, bodyR + 3]);
 
     /* Update live state telemetry strip below the trajectory plot. */
     var readout = $('trajectory-readout');
@@ -1159,11 +1211,16 @@
       'aria-label': 'Porkchop Lambert contour grid inspector, use arrow keys to move the crosshair'
     });
     svg.appendChild(hit);
+    function pickCell(ev) {
+      var pointer = chartPoint(svg, ev, width, height), mx = pointer[0], my = pointer[1];
+      return [
+        clamp(Math.floor((mx - box.x) / cw), 0, g.cols - 1),
+        clamp(g.rows - 1 - Math.floor((my - box.y) / ch), 0, g.rows - 1)
+      ];
+    }
     hit.addEventListener('mousemove', function (ev) {
       var r = svg.getBoundingClientRect();
-      var pointer = chartPoint(svg, ev, width, height), mx = pointer[0], my = pointer[1];
-      var di = clamp(Math.floor((mx - box.x) / cw), 0, g.cols - 1);
-      var fi = clamp(g.rows - 1 - Math.floor((my - box.y) / ch), 0, g.rows - 1);
+      var picked = pickCell(ev), di = picked[0], fi = picked[1];
       setCrosshair(di, fi);
       var c = cellAt(g, di, fi);
       showTooltip('porkchop-tooltip', ev.clientX - r.left, ev.clientY - r.top,
@@ -1173,6 +1230,11 @@
           { label: 'v_inf,dep', value: num(c.dvDeparture, 1) + ' m/s' },
           { label: 'v_inf,arr', value: num(c.dvArrival, 1) + ' m/s' }
         ]);
+    });
+    hit.addEventListener('click', function (ev) {
+      var picked = pickCell(ev);
+      setCrosshair(picked[0], picked[1]);
+      if (hit.focus) hit.focus();
     });
     hit.addEventListener('mouseleave', function () { hideTooltip('porkchop-tooltip'); });
     hit.addEventListener('keydown', function (ev) {

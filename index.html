@@ -7,6 +7,7 @@
 <meta name="description" content="OrbitLab: offline astrodynamics and trajectory analysis console for Keplerian orbits, Hohmann and bi-elliptic transfers, universal-variable Lambert porkchop contours, adaptive RK45 J2 propagation, and NASA GMAT / CCSDS OEM exports.">
 <meta name="theme-color" content="#0c0f12">
 <title>OrbitLab | Astrodynamics &amp; Trajectory Analysis Console</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -28,7 +29,6 @@
         <h1>OrbitLab</h1>
         <span class="console-tag">MISSION WORKBENCH</span>
       </div>
-      <p class="brand-sub">Explore a mission. Inspect the physics. Export the evidence.</p>
     </div>
   </div>
   <div class="header-actions">
@@ -42,15 +42,15 @@
 
 <main id="workspace" tabindex="-1">
   <section class="mission-intro" aria-labelledby="mission-intro-title">
-    <div><p class="eyebrow">FLIGHT DYNAMICS / MISSION DESIGN</p><h2 id="mission-intro-title">Plan the burn. Prove the orbit.</h2><p>Five missions, one shared physics engine. Every state and maneuver is yours to inspect.</p></div>
+    <div><h2 id="mission-intro-title">Plan the burn. Prove the orbit.</h2></div>
     <span id="verification-status" class="verification-badge" role="status">Checking numerical precision</span>
   </section>
   <section class="showcase-grid" aria-label="One click mission showcases">
-    <button type="button" class="mission-card" data-mission="leo-geo-comms" aria-pressed="true"><span>01 / CONNECT</span><strong>Reach geostationary orbit</strong><small>Two burns. Inspect the delta-v budget.</small></button>
-    <button type="button" class="mission-card" data-mission="sun-sync-eo1" aria-pressed="false"><span>02 / OBSERVE</span><strong>Follow the Sun with J2</strong><small>Nodal drift meets 0.9856 deg/day.</small></button>
-    <button type="button" class="mission-card" data-mission="molniya-12h" aria-pressed="false"><span>03 / DWELL</span><strong>Ride a Molniya ellipse</strong><small>Watch speed change at e = 0.72.</small></button>
-    <button type="button" class="mission-card" data-mission="earth-mars-rendezvous" aria-pressed="false"><span>04 / RENDEZVOUS</span><strong>Find a Mars launch window</strong><small>780 Lambert cells. Verify an arrival.</small></button>
-    <button type="button" class="mission-card" data-mission="bi-elliptic-deep-space" aria-pressed="false"><span>05 / OPTIMIZE</span><strong>Spend less with three burns</strong><small>Compare bi-elliptic and Hohmann.</small></button>
+    <button type="button" class="mission-card" data-mission="leo-geo-comms" aria-pressed="true"><strong>Reach geostationary orbit</strong><small>Two burns. Inspect the delta-v budget.</small></button>
+    <button type="button" class="mission-card" data-mission="sun-sync-eo1" aria-pressed="false"><strong>Follow the Sun with J2</strong><small>Nodal drift meets 0.9856 deg/day.</small></button>
+    <button type="button" class="mission-card" data-mission="molniya-12h" aria-pressed="false"><strong>Ride a Molniya ellipse</strong><small>Watch speed change at e = 0.72.</small></button>
+    <button type="button" class="mission-card" data-mission="earth-mars-rendezvous" aria-pressed="false"><strong>Find a Mars launch window</strong><small>780 Lambert cells. Verify an arrival.</small></button>
+    <button type="button" class="mission-card" data-mission="bi-elliptic-deep-space" aria-pressed="false"><strong>Spend less with three burns</strong><small>Compare bi-elliptic and Hohmann.</small></button>
   </section>
   <section class="telemetry-bar" aria-label="Active mission telemetry summary">
     <div class="telemetry-cell telemetry-cell-wide">
@@ -133,7 +133,6 @@
       <div class="panel-head">
         <div>
           <h2 id="trajectory-title">Perifocal &amp; Inertial Trajectory Plot</h2>
-          <p class="panel-sub" id="trajectory-sub">Perifocal PQW projection with transfer ellipses, line of apsides, velocity vector, and burn nodes</p>
         </div>
         <div class="legend" id="trajectory-legend" aria-label="Trajectory legend"></div>
       </div>
@@ -141,6 +140,7 @@
         <svg id="trajectory-svg" class="viz-svg" viewBox="0 0 760 420" role="group" tabindex="0" aria-label="Orbit inspector. Use left and right arrows to scrub the spacecraft." aria-labelledby="trajectory-title trajectory-desc" preserveAspectRatio="xMidYMid meet">
           <desc id="trajectory-desc">Technical orbital plot showing central body, parking orbit, transfer arcs, apsis markers, velocity vector, and scrubbed spacecraft state.</desc>
         </svg>
+        <p class="chart-caption" id="trajectory-sub">Perifocal PQW projection with transfer ellipses, line of apsides, velocity vector, and burn nodes</p>
         <div id="trajectory-tooltip" class="tooltip" role="status" aria-live="polite" hidden></div>
       </div>
       <div class="state-readout-strip" id="trajectory-readout" aria-live="polite"></div>
@@ -156,7 +156,6 @@
       <div class="panel-head">
         <div>
           <h2 id="porkchop-title">Lambert Porkchop Contour Plot (Total dv &amp; C3 Isolines)</h2>
-          <p class="panel-sub" id="porkchop-sub">Departure epoch vs. time of flight solved with universal-variable Stumpff iterations</p>
         </div>
         <div class="legend legend-scale" id="porkchop-legend" aria-label="Porkchop contour and scale legend"></div>
       </div>
@@ -164,6 +163,7 @@
         <svg id="porkchop-svg" class="viz-svg" viewBox="0 0 760 430" role="img" aria-labelledby="porkchop-title porkchop-desc" preserveAspectRatio="xMidYMid meet">
           <desc id="porkchop-desc">Two-dimensional Lambert transfer contour plot with total delta-v heatmap, marching-squares total dv isolines, dashed C3 characteristic energy isolines, and minimum-energy markers.</desc>
         </svg>
+        <p class="chart-caption" id="porkchop-sub">Departure epoch vs. time of flight solved with universal-variable Stumpff iterations</p>
         <div id="porkchop-tooltip" class="tooltip" role="status" aria-live="polite" hidden></div>
       </div>
       <div class="inspector" id="porkchop-inspector" aria-live="polite"></div>
@@ -180,13 +180,13 @@
       <div class="panel-head">
         <div>
           <h2 id="transfer-title">Maneuver Impulse Breakdown</h2>
-          <p class="panel-sub" id="transfer-sub">Impulsive delta-v budget and Hohmann vs. Bi-Elliptic crossover check (r2/r1 = 11.94)</p>
         </div>
       </div>
       <div class="chart-frame">
         <svg id="transfer-svg" class="viz-svg" viewBox="0 0 440 270" role="img" aria-labelledby="transfer-title transfer-desc" preserveAspectRatio="xMidYMid meet">
           <desc id="transfer-desc">Horizontal technical bars showing the delta-v magnitude and share of each maneuver burn.</desc>
         </svg>
+        <p class="chart-caption" id="transfer-sub">Impulsive delta-v budget and Hohmann vs. Bi-Elliptic crossover check (r2/r1 = 11.94)</p>
         <div id="transfer-tooltip" class="tooltip" role="status" aria-live="polite" hidden></div>
       </div>
       <details class="table-twin">
@@ -201,7 +201,6 @@
       <div class="panel-head">
         <div>
           <h2 id="staging-title">Tsiolkovsky Multi-Stage Budget</h2>
-          <p class="panel-sub">Stage delta-v (ve * ln(m0/mf)) and cumulative vehicle velocity</p>
         </div>
         <div class="legend" id="staging-legend"></div>
       </div>
@@ -209,6 +208,7 @@
         <svg id="staging-svg" class="viz-svg" viewBox="0 0 440 270" role="img" aria-labelledby="staging-title staging-desc" preserveAspectRatio="xMidYMid meet">
           <desc id="staging-desc">Stage-by-stage delta-v bars overlaid with the cumulative vehicle delta-v profile.</desc>
         </svg>
+        <p class="chart-caption">Stage delta-v (ve * ln(m0/mf)) and cumulative vehicle velocity</p>
         <div id="staging-tooltip" class="tooltip" role="status" aria-live="polite" hidden></div>
       </div>
       <details class="table-twin">
@@ -223,7 +223,6 @@
       <div class="panel-head">
         <div>
           <h2 id="energy-title">Adaptive RK45 &amp; Conserved Energy</h2>
-          <p class="panel-sub" id="energy-sub">Relative specific mechanical energy drift (dE/E0) and secular RAAN / argument of periapsis drift rates</p>
         </div>
         <div class="legend" id="energy-legend"></div>
       </div>
@@ -231,6 +230,7 @@
         <svg id="energy-svg" class="viz-svg" viewBox="0 0 760 290" role="img" aria-labelledby="energy-title energy-desc" preserveAspectRatio="xMidYMid meet">
           <desc id="energy-desc">Technical line plot of relative specific energy drift over one orbital period under adaptive Runge-Kutta integration.</desc>
         </svg>
+        <p class="chart-caption" id="energy-sub">Relative specific mechanical energy drift (dE/E0) and secular RAAN / argument of periapsis drift rates</p>
         <div id="energy-tooltip" class="tooltip" role="status" aria-live="polite" hidden></div>
       </div>
       <div class="metric-strip" id="propagation-metrics" aria-label="Propagator and J2 secular metrics"></div>

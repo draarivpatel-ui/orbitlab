@@ -407,6 +407,62 @@
     return { C: c, S: s };
   }
 
+  /* Universal-variable Kepler propagator: advances (r0v, v0v) by dtSec along
+   * the two-body conic through the universal anomaly chi. Exact to solver
+   * tolerance, so it can verify and polish Lambert endpoint closure. */
+  function keplerPropagateUniversal(r0v, v0v, dtSec, mu, singleRevolution, chiSeed) {
+    var r0 = norm(r0v), sqrtMu = Math.sqrt(mu);
+    if (!(r0 > 0) || !isFinite(dtSec)) return null;
+    if (dtSec === 0) return { r: r0v.slice(), v: v0v.slice(), converged: true };
+    var alpha = 2 / r0 - dot(v0v, v0v) / mu;
+    var rv0 = dot(r0v, v0v) / sqrtMu;
+    var x = (typeof chiSeed === 'number' && isFinite(chiSeed)) ? chiSeed
+      : (Math.abs(alpha) > 1e-12 ? sqrtMu * alpha * dtSec : sqrtMu * dtSec / r0);
+    if (alpha < -1e-12 && chiSeed === undefined) {
+      var aHyp = 1 / alpha;
+      var arg = (-2 * mu * alpha * dtSec) /
+        (rv0 + Math.sign(dtSec) * Math.sqrt(-mu * aHyp) * (1 - r0 * alpha));
+      if (arg > 0) x = Math.sign(dtSec) * Math.sqrt(-aHyp) * Math.log(arg);
+    }
+    var chiMax = singleRevolution && alpha > 0 ? TAU / Math.sqrt(alpha) * 1.02 : Infinity;
+    var ok = false, cs = null, z = 0, fResid = Infinity;
+    for (var i = 0; i < 60; i++) {
+      z = alpha * x * x;
+      cs = stumpff(z);
+      fResid = rv0 * x * x * cs.C + x * x * x * cs.S + r0 * x * (1 - z * cs.S) - sqrtMu * dtSec;
+      var fp = rv0 * x * (1 - z * cs.S) + x * x * cs.C + r0 * (1 - z * cs.C);
+      if (!isFinite(fResid) || !isFinite(fp) || fp === 0) break;
+      var next = x - fResid / fp;
+      if (!isFinite(next)) break;
+      if (Math.abs(next) > chiMax) next = Math.sign(next) * chiMax;
+      if (Math.abs(next - x) < 1e-13 * Math.max(1, Math.abs(x))) { x = next; ok = true; break; }
+      x = next;
+    }
+    if (!ok || !cs || Math.abs(fResid) / sqrtMu > 1e-9 * Math.abs(dtSec) + 1e-6) return null;
+    var f2 = 1 - x * x * cs.C / r0;
+    var g = dtSec - x * x * x * cs.S / sqrtMu;
+    var r = add(scale(r0v, f2), scale(v0v, g));
+    var rm = norm(r);
+    if (!(rm > 0)) return null;
+    var gd = 1 - x * x * cs.C / rm;
+    var fd = sqrtMu * x * (z * cs.S - 1) / (rm * r0);
+    return { r: r, v: add(scale(r0v, fd), scale(v0v, gd)), chi: x, converged: true };
+  }
+
+  /* Dense 3x3 solve A x = b via Cramer's rule; null when singular. */
+  function solve3x3(A, b) {
+    var a = A[0], bb = A[1], c = A[2];
+    var d = a[0] * (bb[1] * c[2] - bb[2] * c[1]) - bb[0] * (a[1] * c[2] - a[2] * c[1]) + c[0] * (a[1] * bb[2] - a[2] * bb[1]);
+    if (!isFinite(d) || Math.abs(d) < 1e-300) return null;
+    function det(col) {
+      var m0 = col === 0 ? b[0] : a[0], m1 = col === 1 ? b[0] : a[1], m2 = col === 2 ? b[0] : a[2];
+      var n0 = col === 0 ? b[1] : bb[0], n1 = col === 1 ? b[1] : bb[1], n2 = col === 2 ? b[1] : bb[2];
+      var o0 = col === 0 ? b[2] : c[0], o1 = col === 1 ? b[2] : c[1], o2 = col === 2 ? b[2] : c[2];
+      return m0 * (n1 * o2 - n2 * o1) - m1 * (n0 * o2 - n2 * o0) + m2 * (n0 * o1 - n1 * o0);
+    }
+    return [det(0) / d, det(1) / d, det(2) / d];
+  }
+
   /* Universal variable Lambert boundary value solver, zero revolutions. */
   function solveLambert(r1Vec, r2Vec, dtSec, mu, prograde) {
     mu = gravityParameter(mu);
@@ -534,6 +590,57 @@
     var gdCoef = 1 - y / r2;
     var v1out = scale(sub(r2v, scale(r1v, fCoef)), 1 / g);
     var v2out = scale(sub(scale(r2v, gdCoef), r1v), 1 / g);
+
+    /* Endpoint closure polish. Near the antipodal singularity the z residual
+     * can be satisfied while f and g leave the propagated endpoint off r2,
+     * so verify closure explicitly and Newton-correct v1 on the endpoint. */
+    var endpointMiss = Infinity;
+    var alphaSeed = 2 / r1 - dot(v1out, v1out) / mu;
+    var chiSeed = (converged && mid.ok && Math.abs(alphaSeed) > 1e-14 && mid.z / alphaSeed > 0)
+      ? Math.sign(dtSec) * Math.sqrt(mid.z / alphaSeed) : undefined;
+    /* Universal propagation is exact but can lose the root near the antipodal
+     * singularity; RK45 integration is the independent fallback there. */
+    function propEnd(vv, seed) {
+      var u = keplerPropagateUniversal(r1v, vv, dtSec, mu, true, seed === undefined ? chiSeed : seed);
+      if (u) return u;
+      try {
+        var p45 = propagateRK45(r1v, vv, dtSec, { mu: mu, relativeTolerance: 1e-12, positionTolerance: 1e-4, velocityTolerance: 1e-7 });
+        var last = p45.points[p45.points.length - 1];
+        return { r: last.r, v: last.v, converged: true };
+      } catch (e) { return null; }
+    }
+    var prop0 = converged ? propEnd(v1out) : null;
+    if (prop0) {
+      endpointMiss = norm(sub(prop0.r, r2v));
+      var bestV1 = v1out, bestProp = prop0, curV1 = v1out, curProp = prop0;
+      for (var polish = 0; polish < 10 && endpointMiss > 1e-9 * r2; polish++) {
+        var J = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+        var singular = false;
+        for (var j = 0; j < 3; j++) {
+          var hfd = 1e-7 * Math.max(1, Math.abs(curV1[j]));
+          var vp = curV1.slice();
+          vp[j] += hfd;
+          var pe = propEnd(vp, curProp.chi);
+          if (!pe) { singular = true; break; }
+          for (var i3 = 0; i3 < 3; i3++) J[i3][j] = (pe.r[i3] - curProp.r[i3]) / hfd;
+        }
+        if (singular) break;
+        var dv = solve3x3(J, scale(sub(curProp.r, r2v), -1));
+        if (!dv || !dv.every(isFinite)) break;
+        var cand = add(curV1, dv);
+        var p2 = propEnd(cand, curProp.chi);
+        if (!p2) break;
+        curV1 = cand; curProp = p2;
+        var miss2 = norm(sub(p2.r, r2v));
+        if (miss2 < endpointMiss) { bestV1 = curV1; bestProp = p2; endpointMiss = miss2; }
+      }
+      v1out = bestV1;
+      v2out = bestProp.v;
+    }
+    /* A converged z residual is only trustworthy if the reconstructed v1
+     * actually closes on r2; near the antipodal singularity it can fail, so
+     * unverifiable or badly missing solutions are reported as unconverged. */
+    if (converged && (!isFinite(endpointMiss) || endpointMiss > 1e-4 * r2)) converged = false;
     var energy = dot(v1out, v1out) / 2 - mu / r1;
     var a = Math.abs(energy) > 1e-14 ? -mu / (2 * energy) : Infinity;
     var hvec = cross(r1v, v1out);
@@ -542,6 +649,7 @@
       v1: v1out, v2: v2out, a: a, p: p, iterations: iterations, converged: converged,
       transferAngleRad: dnu, prograde: prograde,
       timeOfFlightSec: dtSec, residual: mid.ok ? mid.f / sqrtMu : Infinity,
+      endpointMiss: endpointMiss,
       universalVariable: mid.z, semiLatusRectum: p,
       method: 'universal-variable-bate-mueller-white'
     };
