@@ -317,7 +317,7 @@
     state.verifiedKey = '';
     $('j2-toggle').disabled = data.preset.mu !== C.MU_EARTH;
     $('j2-toggle').setAttribute('aria-checked', data.propagation.j2Enabled ? 'true' : 'false');
-    $('j2-toggle').querySelector('.switch-text').textContent = data.preset.mu !== C.MU_EARTH ? 'Solar point mass' : data.propagation.j2Enabled ? 'On (full J2 potential)' : 'Off (two-body)';
+    $('j2-toggle').querySelector('.switch-text').textContent = data.preset.mu !== C.MU_EARTH ? 'Solar point mass' : data.propagation.j2Enabled ? 'On (J2 = 1.0826e-3)' : 'Off (two-body)';
     doc.querySelectorAll('[data-mission]').forEach(function (button) { button.setAttribute('aria-pressed', button.dataset.mission === state.presetId ? 'true' : 'false'); });
   }
   function selectMission(id) {

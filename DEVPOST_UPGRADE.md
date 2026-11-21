@@ -27,7 +27,7 @@ A solver can report a small residual while still producing a misleading applicat
 
 ## Verification numbers
 
-The command `node --test --test-reporter=spec` passes 176 tests, including 18 shipped-script DOM runtime tests. All seven JavaScript and fixture files pass `node --check`.
+The command `node --test --test-reporter=spec` passes 178 tests, including 19 shipped-script DOM runtime tests. All seven JavaScript and fixture files pass `node --check`.
 
 The four 30x26 numerical windows converge in all 3,120 cells. The selected Mars optimum costs 6,713.970956 m/s and misses its independently propagated arrival by 2.592943 m, or 1.13732e-11 relative to the arrival radius. The LEO/GEO optimum misses by 0.005337 m. Default conserved energy drift remains below 9e-10 across all five reference showcases. The Sun synchronous solution is 98.207969664 degrees, with 0.9856 degrees/day secular nodal drift.
 

@@ -40,7 +40,7 @@ The verification strip recalculates Kepler residuals, Cartesian state reconstruc
 | Sun synchronous inclination | 98.207969664 degrees at 705 km |
 | Bi-elliptic tradeoff | 4,067.470682 m/s versus 4,112.020389 m/s for Hohmann; 1.083402% saving |
 
-These are deterministic calculations, not measured flight performance. Tests check analytic identities, independent integration and explicit tolerances.
+These are deterministic calculations, not measured flight performance. Tests check analytic identities, independent integration and explicit tolerances. Last verified 2026-11-20.
 
 ## Run and verify
 
